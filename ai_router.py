@@ -40,9 +40,14 @@ Kullanıcının timezone: Europe/Istanbul\
 """
 
 
-def _build_url() -> str:
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+
+def _gemini_headers() -> dict:
     key = os.getenv("GEMINI_API_KEY", "")
-    return f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY ortam değişkeni ayarlanmamış")
+    return {"x-goog-api-key": key, "Content-Type": "application/json"}
 
 
 async def parse_message(user_message: str) -> Dict[str, Any]:
@@ -65,7 +70,9 @@ async def parse_message(user_message: str) -> Dict[str, Any]:
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(_build_url(), json=payload)
+        resp = await client.post(GEMINI_URL, headers=_gemini_headers(), json=payload)
+        if resp.status_code == 429:
+            raise RuntimeError("Gemini API istek limiti aşıldı (429). Birkaç saniye sonra tekrar deneyin.")
         resp.raise_for_status()
         data = resp.json()
 
