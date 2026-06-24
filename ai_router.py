@@ -40,7 +40,7 @@ Kullanıcının timezone: Europe/Istanbul\
 """
 
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent"
 
 
 def _gemini_headers() -> dict:
