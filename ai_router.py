@@ -71,10 +71,17 @@ async def parse_message(user_message: str) -> Dict[str, Any]:
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(GEMINI_URL, headers=_gemini_headers(), json=payload)
-        if resp.status_code == 429:
-            raise RuntimeError("Gemini API istek limiti aşıldı (429). Birkaç saniye sonra tekrar deneyin.")
-        resp.raise_for_status()
-        data = resp.json()
+
+    if not resp.is_success:
+        # Gerçek Gemini hata mesajını göster
+        try:
+            err_body = resp.json()
+            err_msg = err_body.get("error", {}).get("message", resp.text)
+        except Exception:
+            err_msg = resp.text
+        raise RuntimeError(f"Gemini API hatası [{resp.status_code}]: {err_msg}")
+
+    data = resp.json()
 
     raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
