@@ -42,7 +42,7 @@ Kullanıcının timezone: Europe/Istanbul\
 
 def _build_url() -> str:
     key = os.getenv("GEMINI_API_KEY", "")
-    return f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
+    return f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
 
 
 async def parse_message(user_message: str) -> Dict[str, Any]:
