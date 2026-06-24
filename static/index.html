@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PRISM — AI Asistan Hub</title>
+  <style>
+    :root {
+      --bg:          #0d0f18;
+      --surface:     #151825;
+      --card:        #1c2033;
+      --border:      #272b3f;
+      --input:       #1a1e30;
+      --text:        #e2e8f0;
+      --muted:       #7a83a6;
+      --accent:      #7c6ff7;
+      --accent-h:    #9d98ff;
+      --green:       #10b981;
+      --red:         #ef4444;
+      --yellow:      #f59e0b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #7c6ff7, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+    .logo-sub { font-size: 0.78rem; color: var(--muted); }
+
+    /* ── Tabs ── */
+    nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      padding: 0 24px;
+      gap: 4px;
+    }
+    .tab {
+      padding: 12px 18px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all .15s;
+      user-select: none;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent-h); border-bottom-color: var(--accent); }
+
+    /* ── Layout ── */
+    main { max-width: 860px; margin: 0 auto; padding: 28px 20px; }
+    .section { display: none; }
+    .section.active { display: block; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 18px;
+    }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .card-title { font-weight: 600; font-size: 0.95rem; }
+
+    /* ── Forms ── */
+    .fg { margin-bottom: 14px; }
+    .fg label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+    .fg input, .fg select, .fg textarea {
+      width: 100%;
+      background: var(--input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 13px;
+      border-radius: 9px;
+      font-size: 0.88rem;
+      outline: none;
+      transition: border-color .15s;
+      font-family: inherit;
+    }
+    .fg input:focus, .fg select:focus, .fg textarea:focus { border-color: var(--accent); }
+    .fg textarea { min-height: 80px; resize: vertical; }
+    .fg select option { background: var(--card); }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 10px 18px;
+      border: none;
+      border-radius: 9px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+      font-family: inherit;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-h); }
+    .btn-sm { padding: 6px 12px; font-size: 0.78rem; }
+    .btn-danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
+    .btn-danger:hover { background: var(--red); color: #fff; }
+    .btn-ok { background: transparent; color: var(--green); border: 1px solid var(--green); }
+    .btn-ok:hover { background: var(--green); color: #fff; }
+
+    /* ── List items ── */
+    .item {
+      background: var(--input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .item-body { flex: 1; min-width: 0; }
+    .item-title { font-weight: 500; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-meta { font-size: 0.78rem; color: var(--muted); line-height: 1.6; }
+    .item-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .b-crit   { background: rgba(239,68,68,.15); color: #ef4444; }
+    .b-imp    { background: rgba(245,158,11,.15); color: #f59e0b; }
+    .b-norm   { background: rgba(16,185,129,.15); color: #10b981; }
+    .b-done   { background: rgba(120,120,120,.15); color: #888; }
+
+    /* ── Stats ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      text-align: center;
+    }
+    .stat-val { font-size: 1.9rem; font-weight: 700; color: var(--accent-h); }
+    .stat-lbl { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+
+    /* ── Bar chart ── */
+    .bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .bar-lbl { width: 75px; font-size: 0.8rem; color: var(--muted); text-align: right; flex-shrink: 0; }
+    .bar-track { flex: 1; background: var(--input); border-radius: 4px; height: 8px; overflow: hidden; }
+    .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-h)); border-radius: 4px; transition: width .5s ease; }
+    .bar-val { width: 72px; font-size: 0.8rem; flex-shrink: 0; }
+
+    /* ── Weather / Summary ── */
+    .info-box {
+      background: var(--input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      white-space: pre-wrap;
+      line-height: 1.9;
+      font-size: 0.9rem;
+    }
+
+    /* ── Search bar ── */
+    .search-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 11px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .search-wrap input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-size: 0.9rem;
+      outline: none;
+      font-family: inherit;
+    }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 26px;
+      right: 26px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 13px 20px;
+      border-radius: 11px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.5);
+      font-size: 0.875rem;
+      transform: translateY(80px);
+      opacity: 0;
+      transition: all .25s;
+      z-index: 999;
+      max-width: 320px;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.ok  { border-left: 3px solid var(--green); }
+    #toast.err { border-left: 3px solid var(--red); }
+
+    .empty { text-align: center; color: var(--muted); padding: 48px 0; font-size: 0.88rem; }
+    .loading { text-align: center; color: var(--muted); padding: 24px 0; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">⬡ PRISM</div>
+    <div class="logo-sub">Kişisel AI Asistan Hub</div>
+  </div>
+</header>
+
+<nav>
+  <div class="tab active" onclick="switchTab('reminders')">📋 Görevler</div>
+  <div class="tab" onclick="switchTab('notes')">📝 Notlar</div>
+  <div class="tab" onclick="switchTab('expenses')">💰 Harcamalar</div>
+  <div class="tab" onclick="switchTab('summary')">☀️ Özet</div>
+</nav>
+
+<main>
+
+  <!-- ════════════ GÖREVLER ════════════ -->
+  <div id="tab-reminders" class="section active">
+    <div class="card">
+      <div class="card-head"><div class="card-title">Yeni Hatırlatıcı</div></div>
+      <div class="fg">
+        <label>Başlık</label>
+        <input id="r-title" type="text" placeholder="Görev başlığı...">
+      </div>
+      <div class="row2">
+        <div class="fg">
+          <label>Tarih ve Saat</label>
+          <input id="r-dt" type="datetime-local">
+        </div>
+        <div class="fg">
+          <label>Öncelik</label>
+          <select id="r-pri">
+            <option value="3">🟢 Normal</option>
+            <option value="2">🟡 Önemli</option>
+            <option value="1">🔴 Kritik</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="createReminder()">+ Ekle</button>
+    </div>
+
+    <div id="reminders-list"><div class="loading">Yükleniyor...</div></div>
+  </div>
+
+  <!-- ════════════ NOTLAR ════════════ -->
+  <div id="tab-notes" class="section">
+    <div class="card">
+      <div class="card-head"><div class="card-title">Yeni Not</div></div>
+      <div class="row2">
+        <div class="fg">
+          <label>Başlık</label>
+          <input id="n-title" type="text" placeholder="Not başlığı...">
+        </div>
+        <div class="fg">
+          <label>Kategori</label>
+          <input id="n-cat" type="text" placeholder="genel, iş, kişisel...">
+        </div>
+      </div>
+      <div class="fg">
+        <label>İçerik</label>
+        <textarea id="n-content" placeholder="Not içeriği..."></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="createNote()">+ Kaydet</button>
+    </div>
+
+    <div class="search-wrap">
+      <span style="color:var(--muted)">🔍</span>
+      <input id="n-search" type="text" placeholder="Notlarda ara..." oninput="onNoteSearch(this.value)">
+    </div>
+
+    <div id="notes-list"><div class="loading">Yükleniyor...</div></div>
+  </div>
+
+  <!-- ════════════ HARCAMALAR ════════════ -->
+  <div id="tab-expenses" class="section">
+    <div class="card">
+      <div class="card-head"><div class="card-title">Yeni Harcama</div></div>
+      <div class="row2">
+        <div class="fg">
+          <label>Miktar (TL)</label>
+          <input id="e-amt" type="number" placeholder="0.00" step="0.01" min="0">
+        </div>
+        <div class="fg">
+          <label>Kategori</label>
+          <select id="e-cat">
+            <option value="yemek">🍔 Yemek</option>
+            <option value="ulaşım">🚌 Ulaşım</option>
+            <option value="eğlence">🎮 Eğlence</option>
+            <option value="fatura">💡 Fatura</option>
+            <option value="diğer">📦 Diğer</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg">
+        <label>Açıklama (opsiyonel)</label>
+        <input id="e-desc" type="text" placeholder="...">
+      </div>
+      <button class="btn btn-primary" onclick="createExpense()">+ Ekle</button>
+    </div>
+
+    <div id="expense-stats" class="stats"></div>
+    <div id="expense-chart" class="card"></div>
+    <div id="expenses-list"><div class="loading">Yükleniyor...</div></div>
+  </div>
+
+  <!-- ════════════ ÖZET ════════════ -->
+  <div id="tab-summary" class="section">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Günlük Özet</div>
+        <button class="btn btn-primary btn-sm" onclick="loadSummary()">↺ Yenile</button>
+      </div>
+      <div id="summary-box" class="info-box">Yükleniyor...</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Hava Durumu</div>
+        <button class="btn btn-primary btn-sm" onclick="loadWeather()">↺ Yenile</button>
+      </div>
+      <div id="weather-box" class="info-box">Yükleniyor...</div>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+/* ─── Utilities ─────────────────────────────── */
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = '', 3200);
+}
+
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
+  }
+  return res.json();
+}
+
+function timeLeft(isoStr) {
+  const diff = new Date(isoStr) - Date.now();
+  if (diff < -86400000) return `<span style="color:var(--red)">Geçti</span>`;
+  if (diff < 0)  { const m = Math.floor(-diff/60000); return `<span style="color:var(--red)">${m < 60 ? m+'dk' : Math.floor(m/60)+'s'} geçti</span>`; }
+  const m = Math.floor(diff / 60000);
+  if (m < 60)   return `${m} dk kaldı`;
+  if (m < 1440) { const h=Math.floor(m/60), rm=m%60; return rm ? `${h}s ${rm}dk kaldı` : `${h} saat kaldı`; }
+  return `${Math.floor(m/1440)} gün kaldı`;
+}
+
+function fmtDate(iso) {
+  return new Date(iso).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+/* ─── Tab switching ──────────────────────────── */
+const TABS = ['reminders','notes','expenses','summary'];
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', TABS[i]===name));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  if (name==='reminders') loadReminders();
+  if (name==='notes')     loadNotes();
+  if (name==='expenses')  loadExpenses();
+  if (name==='summary')  { loadSummary(); loadWeather(); }
+}
+
+/* ─── GÖREVLER ──────────────────────────────── */
+async function loadReminders() {
+  const el = document.getElementById('reminders-list');
+  try {
+    const data = await api('/api/reminders/');
+    if (!data.length) { el.innerHTML = '<div class="empty">Aktif hatırlatıcı yok.</div>'; return; }
+
+    const pBadge = {1:'b-crit',2:'b-imp',3:'b-norm'};
+    const pName  = {1:'🔴 Kritik',2:'🟡 Önemli',3:'🟢 Normal'};
+
+    el.innerHTML = data.map(r => `
+      <div class="item" id="rem-${r.id}">
+        <div class="item-body">
+          <div class="item-title">${esc(r.title)}</div>
+          <div class="item-meta">
+            📅 ${fmtDate(r.due_datetime)} — ${timeLeft(r.due_datetime)}
+            &nbsp; <span class="badge ${pBadge[r.priority]||'b-norm'}">${pName[r.priority]||'Normal'}</span>
+            ${r.snooze_count ? `&nbsp; ⏰×${r.snooze_count}` : ''}
+          </div>
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-sm btn-ok"     onclick="completeReminder(${r.id})">✅</button>
+          <button class="btn btn-sm btn-danger"  onclick="deleteReminder(${r.id})">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { el.innerHTML = `<div class="empty">Yükleme hatası: ${e.message}</div>`; }
+}
+
+async function createReminder() {
+  const title = v('r-title'), dt = v('r-dt'), priority = parseInt(v('r-pri'));
+  if (!title || !dt) { toast('Başlık ve tarih gerekli', 'err'); return; }
+  try {
+    await api('/api/reminders/', 'POST', { title, due_datetime: dt, priority });
+    toast('Hatırlatıcı eklendi ✅');
+    clear('r-title');
+    loadReminders();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function completeReminder(id) {
+  try {
+    await api(`/api/reminders/${id}/complete`, 'PUT');
+    toast('Tamamlandı ✅');
+    loadReminders();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function deleteReminder(id) {
+  if (!confirm('Hatırlatıcıyı silmek istediğinizden emin misiniz?')) return;
+  try {
+    await api(`/api/reminders/${id}`, 'DELETE');
+    toast('Silindi 🗑');
+    loadReminders();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+/* ─── NOTLAR ────────────────────────────────── */
+let _searchTimer = null;
+
+async function loadNotes(q = '') {
+  const el = document.getElementById('notes-list');
+  try {
+    const path = q ? `/api/notes/search?q=${encodeURIComponent(q)}` : '/api/notes/';
+    const data = await api(path);
+    if (!data.length) { el.innerHTML = '<div class="empty">Not bulunamadı.</div>'; return; }
+    el.innerHTML = data.map(n => `
+      <div class="item">
+        <div class="item-body">
+          <div class="item-title">${esc(n.title)}</div>
+          <div class="item-meta">${esc(n.content.slice(0,120))}${n.content.length>120?'…':''}</div>
+          <div class="item-meta" style="margin-top:5px">🏷 ${esc(n.category)} · ${new Date(n.created_at).toLocaleDateString('tr-TR')}</div>
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-sm btn-danger" onclick="deleteNote(${n.id})">🗑</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { el.innerHTML = `<div class="empty">${e.message}</div>`; }
+}
+
+function onNoteSearch(q) {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => loadNotes(q.trim()), 380);
+}
+
+async function createNote() {
+  const title = v('n-title'), content = v('n-content'), category = v('n-cat') || 'genel';
+  if (!title || !content) { toast('Başlık ve içerik gerekli', 'err'); return; }
+  try {
+    await api('/api/notes/', 'POST', { title, content, category });
+    toast('Not kaydedildi 📝');
+    clear('n-title'); clear('n-content'); clear('n-cat');
+    loadNotes();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function deleteNote(id) {
+  if (!confirm('Notu silmek istediğinizden emin misiniz?')) return;
+  try {
+    await api(`/api/notes/${id}`, 'DELETE');
+    toast('Not silindi 🗑');
+    loadNotes(document.getElementById('n-search').value);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+/* ─── HARCAMALAR ─────────────────────────────── */
+const CAT_EMOJI = { yemek:'🍔', 'ulaşım':'🚌', 'eğlence':'🎮', fatura:'💡', 'diğer':'📦' };
+
+async function loadExpenses() {
+  try {
+    const [expenses, summary] = await Promise.all([
+      api('/api/expenses/'),
+      api('/api/expenses/summary'),
+    ]);
+
+    // İstatistik kartları
+    const thisMonth = new Date().toLocaleString('tr-TR', { month:'long', year:'numeric' });
+    document.getElementById('expense-stats').innerHTML = `
+      <div class="stat"><div class="stat-val">${summary.total.toFixed(0)}</div><div class="stat-lbl">Bu ay toplam (TL)</div></div>
+      <div class="stat"><div class="stat-val">${expenses.length}</div><div class="stat-lbl">İşlem sayısı</div></div>
+      <div class="stat"><div class="stat-val">${Object.keys(summary.by_category||{}).length}</div><div class="stat-lbl">Kategori</div></div>`;
+
+    // Bar grafik
+    const cats = Object.entries(summary.by_category || {}).sort((a,b)=>b[1]-a[1]);
+    const maxV  = Math.max(...cats.map(c=>c[1]), 1);
+    document.getElementById('expense-chart').innerHTML = cats.length
+      ? cats.map(([cat,val]) => `
+          <div class="bar-row">
+            <div class="bar-lbl">${CAT_EMOJI[cat]||'📦'} ${cat}</div>
+            <div class="bar-track"><div class="bar-fill" style="width:${(val/maxV*100).toFixed(1)}%"></div></div>
+            <div class="bar-val">${val.toFixed(0)} TL</div>
+          </div>`).join('')
+      : '<div class="empty">Harcama yok</div>';
+
+    // Liste
+    const el = document.getElementById('expenses-list');
+    if (!expenses.length) { el.innerHTML = '<div class="empty">Harcama kaydı yok.</div>'; return; }
+    el.innerHTML = expenses.map(e => `
+      <div class="item">
+        <div class="item-body">
+          <div class="item-title">${CAT_EMOJI[e.category]||'📦'} ${e.amount.toFixed(2)} TL — ${esc(e.category)}</div>
+          <div class="item-meta">${esc(e.description)||'—'} &nbsp;·&nbsp; ${e.expense_date}</div>
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-sm btn-danger" onclick="deleteExpense(${e.id})">🗑</button>
+        </div>
+      </div>`).join('');
+
+  } catch(e) {
+    document.getElementById('expenses-list').innerHTML = `<div class="empty">${e.message}</div>`;
+  }
+}
+
+async function createExpense() {
+  const amount = parseFloat(v('e-amt'));
+  const category = v('e-cat'), description = v('e-desc');
+  if (!amount || amount <= 0) { toast('Geçerli bir miktar girin', 'err'); return; }
+  try {
+    await api('/api/expenses/', 'POST', { amount, category, description });
+    toast('Harcama eklendi 💰');
+    clear('e-amt'); clear('e-desc');
+    loadExpenses();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function deleteExpense(id) {
+  if (!confirm('Harcamayı silmek istediğinizden emin misiniz?')) return;
+  try {
+    await api(`/api/expenses/${id}`, 'DELETE');
+    toast('Silindi 🗑');
+    loadExpenses();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+/* ─── ÖZET ──────────────────────────────────── */
+async function loadSummary() {
+  const el = document.getElementById('summary-box');
+  el.textContent = 'Yükleniyor...';
+  try {
+    const d = await api('/api/summary/');
+    el.textContent = d.summary;
+  } catch(e) { el.textContent = `Özet yüklenemedi: ${e.message}`; }
+}
+
+async function loadWeather() {
+  const el = document.getElementById('weather-box');
+  el.textContent = 'Yükleniyor...';
+  try {
+    const w = await api('/api/weather/');
+    const emoji = weatherEmoji(w.weather_code);
+    el.textContent =
+      `${emoji} ${w.city}: ${w.temperature}°C, ${w.description}\n` +
+      `🌡 Hissedilen: ${w.feels_like}°C | Max: ${w.temp_max}°C / Min: ${w.temp_min}°C\n` +
+      `💨 Rüzgar: ${w.wind_speed} km/s | 💧 Nem: ${w.humidity}%`;
+  } catch(e) { el.textContent = `Hava durumu alınamadı: ${e.message}`; }
+}
+
+function weatherEmoji(c) {
+  if (c===0) return '☀️';
+  if (c<=2)  return '🌤';
+  if (c===3) return '☁️';
+  if (c<=48) return '🌫';
+  if (c<=67) return '🌧';
+  if (c<=77) return '❄️';
+  if (c<=82) return '🌦';
+  return '⛈';
+}
+
+/* ─── Helpers ────────────────────────────────── */
+function v(id) { return document.getElementById(id).value.trim(); }
+function clear(id) { document.getElementById(id).value = ''; }
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ─── Init ───────────────────────────────────── */
+loadReminders();
+</script>
+</body>
+</html>
