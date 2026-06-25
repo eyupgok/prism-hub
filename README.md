@@ -17,7 +17,7 @@ uvicorn main:app --reload
 |---|---|
 | `TELEGRAM_TOKEN` | BotFather'dan alınan bot token |
 | `TELEGRAM_CHAT_ID` | Kendi chat ID'niz (`@userinfobot`'tan öğrenebilirsiniz) |
-| `GEMINI_API_KEY` | Google AI Studio API anahtarı |
+| `GROQ_API_KEY` | Groq API anahtarı (LLM + Whisper) |
 | `WEBHOOK_URL` | Railway deploy URL'si (ör: `https://app.railway.app`) |
 | `WEATHER_CITY` | Şehir adı (görüntüleme için) |
 | `WEATHER_LAT` | Enlem |

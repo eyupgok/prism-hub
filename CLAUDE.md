@@ -129,9 +129,6 @@ WEATHER_LAT         → 38.6748 (varsayılan)
 WEATHER_LON         → 39.2225 (varsayılan)
 DATABASE_PATH       → prism.db (varsayılan)
 ```
-
-**Not:** `GEMINI_API_KEY` artık kullanılmıyor — Groq'a geçildi.
-
 ## Yeni Modül Eklemek
 
 1. `modules/yenimodul/` dizini aç: `__init__.py`, `models.py`, `routes.py`, `service.py`
