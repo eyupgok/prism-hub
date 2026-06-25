@@ -62,6 +62,13 @@ Türkçe zaman ifadelerini şöyle çevir:
 - "bu akşam" → bugün 18:00
 - "bu gece" → bugün 21:00
 
+Saat yorumlama kuralları:
+- Kullanıcı "bugün saat X'e" derse ve o saat geçmişse, otomatik olarak akşam versiyonunu al (örn: saat 9 geçtiyse 21:00 yap)
+- "sabah X" → her zaman AM (09:00 gibi)
+- "akşam X" veya "gece X" → her zaman PM (21:00 gibi)
+- Saat belirtilmeden sadece rakam varsa ve geçmişse → 12 ekle (PM'e çevir)
+- Asla geçmiş bir saate hatırlatıcı kurma
+
 ## HATIRLATICI YARATMA KURALLARI
 Şu ifadeler hatırlatıcı anlamına gelir:
 "hatırlatıcı kur/ekle", "unutma", "randevum var", "toplantım var", "sınavım var", "teslim tarihi", "deadline", "başvuru", "ödev", "hatırlat"
