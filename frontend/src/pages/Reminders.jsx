@@ -18,6 +18,7 @@ const FILTERS = [
   { id: '1', label: '🔴 Kritik' },
   { id: '2', label: '🟡 Önemli' },
   { id: '3', label: '🟢 Normal' },
+  { id: 'recurring', label: '🔄 Tekrarlananlar' },
   { id: 'done', label: '✅ Tamamlananlar' },
 ]
 
@@ -41,7 +42,7 @@ export default function Reminders() {
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ title: '', due_datetime: '', priority: 3 })
+  const [form, setForm] = useState({ title: '', due_datetime: '', priority: 3, recurrence: 'none' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -57,6 +58,7 @@ export default function Reminders() {
 
   const filtered = items.filter(r => {
     if (filter === 'done') return r.is_completed
+    if (filter === 'recurring') return !r.is_completed && r.recurrence && r.recurrence !== 'none'
     if (filter === 'all') return !r.is_completed
     return !r.is_completed && r.priority === Number(filter)
   })
@@ -105,7 +107,7 @@ export default function Reminders() {
           <p className="text-slate-500 text-sm mt-1">{activeCount} aktif</p>
         </div>
         <button
-          onClick={() => { setShowModal(true); setForm({ title: '', due_datetime: defaultDT(), priority: 3 }) }}
+          onClick={() => { setShowModal(true); setForm({ title: '', due_datetime: defaultDT(), priority: 3, recurrence: 'none' }) }}
           className="btn-primary"
         >
           <Plus size={16} />
@@ -254,6 +256,19 @@ export default function Reminders() {
                 <option value={1}>🔴 Kritik</option>
                 <option value={2}>🟡 Önemli</option>
                 <option value={3}>🟢 Normal</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1.5">Tekrar</label>
+              <select
+                value={form.recurrence}
+                onChange={e => setForm(f => ({ ...f, recurrence: e.target.value }))}
+                className="select-field"
+              >
+                <option value="none">Yok</option>
+                <option value="daily">Her gün</option>
+                <option value="weekly">Her hafta</option>
+                <option value="monthly">Her ay</option>
               </select>
             </div>
             {error && <p className="text-xs text-red-400">{error}</p>}

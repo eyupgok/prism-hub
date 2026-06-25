@@ -7,7 +7,7 @@ scheduler = AsyncIOScheduler(timezone=TZ)
 
 
 async def check_reminders():
-    """Her 5 dakikada çalışır; bildirim zamanı gelen hatırlatıcıları gönderir"""
+    """Her 1 dakikada çalışır; bildirim zamanı gelen hatırlatıcıları gönderir"""
     from database import get_db
     from modules.reminders import service as svc
     from telegram_bot import send_reminder_notification
@@ -46,7 +46,7 @@ def start_scheduler():
     scheduler.add_job(
         check_reminders,
         "interval",
-        minutes=5,
+        minutes=1,
         id="check_reminders",
         replace_existing=True,
         max_instances=1,
@@ -61,7 +61,7 @@ def start_scheduler():
     )
 
     scheduler.start()
-    print("✅ Zamanlayıcı başlatıldı (hatırlatıcı kontrolü: 5 dk, sabah özeti: 08:00)")
+    print("✅ Zamanlayıcı başlatıldı (hatırlatıcı kontrolü: 1 dk, sabah özeti: 08:00)")
 
 
 def stop_scheduler():

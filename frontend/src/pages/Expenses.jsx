@@ -164,7 +164,8 @@ export default function Expenses() {
                       cy="48%"
                       innerRadius={55}
                       outerRadius={85}
-                      paddingAngle={3}
+                      paddingAngle={2}
+                      minAngle={10}
                       dataKey="value"
                     >
                       {pieData.map((entry) => (
@@ -173,10 +174,10 @@ export default function Expenses() {
                     </Pie>
                     <Tooltip
                       contentStyle={{
-                        background: '#12101e',
-                        border: '1px solid rgba(109,40,217,0.4)',
+                        background: '#1e1b2e',
+                        border: '1px solid #7c3aed',
                         borderRadius: 10,
-                        color: '#e2e8f0',
+                        color: '#ffffff',
                         fontSize: 12,
                       }}
                       formatter={(v, name) => [`${Number(v).toLocaleString('tr-TR')} ₺`, name]}
@@ -231,8 +232,10 @@ export default function Expenses() {
                         <span className="capitalize">{e.category}</span>
                       </p>
                     </div>
-                    <span className="text-sm font-semibold text-amber-400 flex-shrink-0">
-                      -{e.amount.toLocaleString('tr-TR', { minimumFractionDigits: 0 })} ₺
+                    <span className={`text-sm font-semibold flex-shrink-0 ${e.amount < 0 ? 'text-green-400' : 'text-amber-400'}`}>
+                      {e.amount < 0
+                        ? `+ ${Math.abs(e.amount).toLocaleString('tr-TR', { minimumFractionDigits: 0 })} ₺`
+                        : `- ${e.amount.toLocaleString('tr-TR', { minimumFractionDigits: 0 })} ₺`}
                     </span>
                     <button
                       onClick={() => handleDelete(e.id)}
