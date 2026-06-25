@@ -1,3 +1,4 @@
+import calendar
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
@@ -7,6 +8,7 @@ TZ = pytz.timezone("Europe/Istanbul")
 
 PRIORITY_NAMES = {1: "Kritik", 2: "Önemli", 3: "Normal"}
 PRIORITY_EMOJIS = {1: "🔴", 2: "🟡", 3: "🟢"}
+RECURRENCE_LABELS = {"daily": "Her gün", "weekly": "Her hafta", "monthly": "Her ay"}
 
 
 def now_local() -> datetime:
@@ -14,7 +16,6 @@ def now_local() -> datetime:
 
 
 def parse_dt(dt_str: str) -> datetime:
-    """ISO string'i timezone-aware datetime'a çevirir"""
     dt = datetime.fromisoformat(dt_str)
     if dt.tzinfo is None:
         dt = TZ.localize(dt)
@@ -22,13 +23,10 @@ def parse_dt(dt_str: str) -> datetime:
 
 
 def format_dt(dt: datetime) -> str:
-    """Datetime'ı Türkçe okunabilir formata çevirir"""
-    local = dt.astimezone(TZ)
-    return local.strftime("%d.%m.%Y %H:%M")
+    return dt.astimezone(TZ).strftime("%d.%m.%Y %H:%M")
 
 
 def format_time_remaining(minutes: float) -> str:
-    """Kalan/geçen süreyi okunabilir stringe çevirir"""
     if minutes < 0:
         abs_m = abs(minutes)
         if abs_m < 60:
@@ -44,44 +42,26 @@ def format_time_remaining(minutes: float) -> str:
 
 
 def get_notification_interval(priority: int, minutes_remaining: float) -> Optional[int]:
-    """
-    Kaç dakikada bir bildirim gönderileceğini döner.
-    None → henüz bildirim zamanı değil.
-    """
-    # Süresi geçmiş hatırlatıcıları maksimum frekansta bildir
     effective = max(0.0, minutes_remaining)
 
-    if priority == 1:  # Kritik
-        if effective <= 60:
-            return 15
-        if effective <= 180:
-            return 30
-        if effective <= 360:
-            return 60
-        if effective <= 1440:
-            return 180
-        if effective <= 4320:
-            return 360
-        if effective <= 10080:
-            return 1440
+    if priority == 1:
+        if effective <= 60:   return 15
+        if effective <= 180:  return 30
+        if effective <= 360:  return 60
+        if effective <= 1440: return 180
+        if effective <= 4320: return 360
+        if effective <= 10080: return 1440
         return None
 
-    if priority == 2:  # Önemli
-        if effective <= 30:
-            return 15
-        if effective <= 180:
-            return 60
-        if effective <= 1440:
-            return 360
-        if effective <= 4320:
-            return 1440
+    if priority == 2:
+        if effective <= 30:   return 15
+        if effective <= 180:  return 60
+        if effective <= 1440: return 360
+        if effective <= 4320: return 1440
         return None
 
-    # Normal (3)
-    if effective <= 120:
-        return 60
-    if effective <= 1440:
-        return 720
+    if effective <= 120:  return 60
+    if effective <= 1440: return 720
     return None
 
 
@@ -90,12 +70,12 @@ def create_reminder(
     title: str,
     due_datetime: str,
     priority: int = 3,
+    recurrence: str = "none",
 ) -> Dict[str, Any]:
-    """Yeni hatırlatıcı oluşturur"""
     dt = parse_dt(due_datetime)
     cursor = conn.execute(
-        "INSERT INTO reminders (title, due_datetime, priority, created_at) VALUES (?, ?, ?, ?)",
-        (title, dt.isoformat(), priority, now_local().isoformat()),
+        "INSERT INTO reminders (title, due_datetime, priority, recurrence, created_at) VALUES (?, ?, ?, ?, ?)",
+        (title, dt.isoformat(), priority, recurrence, now_local().isoformat()),
     )
     return get_reminder_by_id(conn, cursor.lastrowid)
 
@@ -123,8 +103,34 @@ def delete_reminder(conn: sqlite3.Connection, reminder_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+def update_reminder(
+    conn: sqlite3.Connection,
+    reminder_id: int,
+    title: str = None,
+    due_datetime: str = None,
+    priority: int = None,
+) -> Optional[Dict[str, Any]]:
+    fields, values = [], []
+    if title is not None:
+        fields.append("title = ?")
+        values.append(title)
+    if due_datetime is not None:
+        dt = parse_dt(due_datetime)
+        fields.append("due_datetime = ?")
+        fields.append("last_notified_at = ?")
+        values.append(dt.isoformat())
+        values.append(None)
+    if priority is not None:
+        fields.append("priority = ?")
+        values.append(priority)
+    if not fields:
+        return get_reminder_by_id(conn, reminder_id)
+    values.append(reminder_id)
+    conn.execute(f"UPDATE reminders SET {', '.join(fields)} WHERE id = ?", values)
+    return get_reminder_by_id(conn, reminder_id)
+
+
 def snooze_reminder(conn: sqlite3.Connection, reminder_id: int, minutes: int) -> Optional[Dict[str, Any]]:
-    """Hatırlatıcıyı şu andan itibaren belirtilen dakika kadar erteler"""
     reminder = get_reminder_by_id(conn, reminder_id)
     if not reminder:
         return None
@@ -132,6 +138,37 @@ def snooze_reminder(conn: sqlite3.Connection, reminder_id: int, minutes: int) ->
     conn.execute(
         "UPDATE reminders SET due_datetime = ?, snooze_count = snooze_count + 1, last_notified_at = NULL WHERE id = ?",
         (new_due.isoformat(), reminder_id),
+    )
+    return get_reminder_by_id(conn, reminder_id)
+
+
+def reschedule_recurring(conn: sqlite3.Connection, reminder_id: int) -> Optional[Dict[str, Any]]:
+    """Tekrarlayan hatırlatıcıyı bir sonraki periyoda öteler"""
+    r = get_reminder_by_id(conn, reminder_id)
+    if not r or r.get("recurrence", "none") == "none":
+        return None
+
+    due = parse_dt(r["due_datetime"])
+    now = now_local()
+    recurrence = r["recurrence"]
+
+    while due <= now:
+        if recurrence == "daily":
+            due = due + timedelta(days=1)
+        elif recurrence == "weekly":
+            due = due + timedelta(weeks=1)
+        elif recurrence == "monthly":
+            year, month = due.year, due.month + 1
+            if month > 12:
+                month, year = 1, year + 1
+            last_day = calendar.monthrange(year, month)[1]
+            due = due.replace(year=year, month=month, day=min(due.day, last_day))
+        else:
+            break
+
+    conn.execute(
+        "UPDATE reminders SET due_datetime = ?, last_notified_at = NULL, is_completed = 0 WHERE id = ?",
+        (due.isoformat(), reminder_id),
     )
     return get_reminder_by_id(conn, reminder_id)
 
@@ -144,7 +181,6 @@ def update_last_notified(conn: sqlite3.Connection, reminder_id: int):
 
 
 def get_reminders_to_notify(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
-    """Bildirim zamanı gelen hatırlatıcıları döner"""
     now = now_local()
     to_notify = []
 
@@ -152,7 +188,6 @@ def get_reminders_to_notify(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
         due = parse_dt(r["due_datetime"])
         minutes_remaining = (due - now).total_seconds() / 60
 
-        # 60 dakikadan fazla geçmişse artık bildir
         if minutes_remaining < -60:
             continue
 
@@ -172,19 +207,21 @@ def get_reminders_to_notify(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
 
 
 def format_reminder_notification(reminder: Dict[str, Any]) -> Tuple[str, List]:
-    """Telegram mesaj metni ve inline keyboard döner"""
     due = parse_dt(reminder["due_datetime"])
     now = now_local()
     minutes_remaining = (due - now).total_seconds() / 60
 
     emoji = PRIORITY_EMOJIS.get(reminder["priority"], "🟢")
     priority_name = PRIORITY_NAMES.get(reminder["priority"], "Normal")
+    recurrence_label = RECURRENCE_LABELS.get(reminder.get("recurrence", "none"), "")
 
     text = (
         f"{emoji} <b>{reminder['title']}</b>\n"
         f"📅 {format_dt(due)} — {format_time_remaining(minutes_remaining)}\n"
         f"🏷 {priority_name}"
     )
+    if recurrence_label:
+        text += f" | 🔁 {recurrence_label}"
 
     keyboard = [
         [

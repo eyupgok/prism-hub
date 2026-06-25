@@ -18,9 +18,13 @@ async def check_reminders():
     for reminder in to_notify:
         try:
             await send_reminder_notification(reminder)
-            # Bildirim zamanını güncelle (tekrar gönderimden önce interval beklensin)
             with get_db() as conn:
                 svc.update_last_notified(conn, reminder["id"])
+                # Tekrarlayan hatırlatıcı vadesi geçtiyse bir sonraki periyoda ötle
+                if reminder.get("recurrence", "none") != "none":
+                    due = svc.parse_dt(reminder["due_datetime"])
+                    if due < svc.now_local():
+                        svc.reschedule_recurring(conn, reminder["id"])
         except Exception as e:
             print(f"❌ Bildirim gönderilemedi [ID={reminder['id']}]: {e}")
 
@@ -39,7 +43,6 @@ async def send_morning_summary():
 
 
 def start_scheduler():
-    # Hatırlatıcı kontrolü — her 5 dakikada bir
     scheduler.add_job(
         check_reminders,
         "interval",
@@ -49,7 +52,6 @@ def start_scheduler():
         max_instances=1,
     )
 
-    # Sabah özeti — her gün 08:00 (Europe/Istanbul)
     scheduler.add_job(
         send_morning_summary,
         CronTrigger(hour=8, minute=0, timezone=TZ),

@@ -21,7 +21,6 @@ async def send_message(
     reply_markup: Optional[Dict] = None,
     parse_mode: str = "HTML",
 ) -> Dict:
-    """Telegram'a mesaj gönderir, mesaj objesini döner"""
     target = chat_id or TELEGRAM_CHAT_ID
     payload: Dict[str, Any] = {
         "chat_id": target,
@@ -42,7 +41,6 @@ async def edit_message(
     text: str,
     reply_markup: Optional[Dict] = None,
 ):
-    """Var olan mesajı düzenler; reply_markup=None → klavyeyi kaldır"""
     payload: Dict[str, Any] = {
         "chat_id": chat_id,
         "message_id": message_id,
@@ -63,15 +61,12 @@ async def answer_callback_query(callback_query_id: str, text: str = ""):
 
 
 async def send_reminder_notification(reminder: Dict[str, Any]):
-    """Hatırlatıcı bildirimini inline butonlarla gönderir"""
     from modules.reminders.service import format_reminder_notification
-
     text, keyboard = format_reminder_notification(reminder)
     await send_message(text, reply_markup={"inline_keyboard": keyboard})
 
 
 async def set_webhook(webhook_url: str):
-    """Railway'de kullanılacak webhook URL'sini Telegram'a bildirir"""
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             _api_url("setWebhook"),
@@ -87,9 +82,35 @@ async def set_webhook(webhook_url: str):
     return data
 
 
+async def _transcribe_voice(file_id: str) -> str:
+    """Telegram ses dosyasını Groq Whisper ile metne çevirir"""
+    from groq import AsyncGroq
+
+    # Telegram'dan dosya yolunu al
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(_api_url("getFile"), params={"file_id": file_id})
+        file_info = resp.json()
+
+    file_path = file_info["result"]["file_path"]
+    file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}"
+
+    # Ses dosyasını indir
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(file_url)
+        audio_bytes = resp.content
+
+    # Groq Whisper ile transkripsiyon
+    groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY", ""))
+    result = await groq_client.audio.transcriptions.create(
+        file=("voice.ogg", audio_bytes, "audio/ogg"),
+        model="whisper-large-v3-turbo",
+        language="tr",
+    )
+    return result.text.strip()
+
+
 @router.post("/webhook")
 async def telegram_webhook(request: Request):
-    """Telegram'dan gelen her güncellemeyi karşılar"""
     try:
         update = await request.json()
     except Exception:
@@ -105,41 +126,125 @@ async def telegram_webhook(request: Request):
 
 async def _handle_message(message: Dict[str, Any]):
     chat_id = str(message["chat"]["id"])
-    text = message.get("text", "").strip()
-
-    if not text:
-        return
 
     # Güvenlik: yalnızca yetkili kullanıcı
     if TELEGRAM_CHAT_ID and chat_id != TELEGRAM_CHAT_ID:
         await send_message("⛔ Yetkisiz erişim.", chat_id=chat_id)
         return
 
-    # /start komutu
+    text = message.get("text", "").strip()
+    voice = message.get("voice")
+
+    if not text and not voice:
+        return
+
+    # ── Hızlı komutlar (AI parse gerektirmez) ────────────────────────────────
     if text.startswith("/start"):
         await send_message(
             "👋 Merhaba! Ben <b>PRISM</b>, kişisel AI asistanınızım.\n\n"
             "Doğal dille konuşabilirsiniz. Örnekler:\n"
             "• <i>Yarın saat 10'da toplantı hatırlatıcısı ekle</i>\n"
+            "• <i>Her pazartesi standup hatırlat</i>\n"
             "• <i>Bugün 150 TL yemek harcadım</i>\n"
             "• <i>İş notlarıma bak</i>\n"
             "• <i>Hava nasıl?</i>\n"
-            "• <i>Sabah özetini ver</i>",
+            "• <i>Sabah özetini ver</i>\n\n"
+            "Hızlı komutlar: /hava /ozet /liste /notlar /butce",
             chat_id=chat_id,
         )
         return
 
-    # İşleniyor mesajı gönder, ID'sini al
-    processing = await send_message("⏳ İşleniyor...", chat_id=chat_id)
-    processing_id: Optional[int] = None
-    if processing.get("ok"):
-        processing_id = processing["result"]["message_id"]
+    if text == "/hava":
+        from modules.weather import service as weather_svc
+        try:
+            weather = await weather_svc.get_weather()
+            await send_message(weather_svc.format_weather_message(weather), chat_id=chat_id)
+        except Exception as e:
+            await send_message(f"❌ Hava durumu alınamadı: {e}", chat_id=chat_id)
+        return
+
+    if text == "/ozet":
+        from modules.summary import service as summary_svc
+        try:
+            await send_message(await summary_svc.get_morning_summary(), chat_id=chat_id)
+        except Exception as e:
+            await send_message(f"❌ Özet alınamadı: {e}", chat_id=chat_id)
+        return
+
+    if text in ("/liste", "/hatirlaticilar"):
+        from database import get_db
+        from modules.reminders import service as svc
+        with get_db() as conn:
+            reminders = svc.list_reminders(conn, False)
+        if not reminders:
+            await send_message("📋 Aktif hatırlatıcı yok.", chat_id=chat_id)
+        else:
+            lines = ["📋 <b>Hatırlatıcılarınız:</b>\n"]
+            for r in reminders:
+                due = svc.parse_dt(r["due_datetime"])
+                emoji = svc.PRIORITY_EMOJIS.get(r["priority"], "🟢")
+                rec = " 🔁" if r.get("recurrence", "none") != "none" else ""
+                lines.append(f"{emoji} [{r['id']}] {r['title']} — {svc.format_dt(due)}{rec}")
+            await send_message("\n".join(lines), chat_id=chat_id)
+        return
+
+    if text == "/notlar":
+        from database import get_db
+        from modules.notes import service as svc
+        with get_db() as conn:
+            notes = svc.list_notes(conn)[:10]
+        if not notes:
+            await send_message("📝 Henüz not yok.", chat_id=chat_id)
+        else:
+            lines = ["📝 <b>Notlarınız:</b>\n"] + [
+                f"• [{n['id']}] {n['title']} ({n['category']})" for n in notes
+            ]
+            await send_message("\n".join(lines), chat_id=chat_id)
+        return
+
+    if text == "/butce":
+        from database import get_db
+        from modules.expenses import service as svc
+        from datetime import datetime
+        import pytz
+        with get_db() as conn:
+            budgets = svc.get_all_budgets(conn)
+            month = datetime.now(pytz.timezone("Europe/Istanbul")).strftime("%Y-%m")
+            if not budgets:
+                await send_message(
+                    "📊 Henüz bütçe limiti ayarlanmamış.\n💡 Örnek: 'Yemek için aylık 3000 TL bütçe koy'",
+                    chat_id=chat_id,
+                )
+            else:
+                lines = ["📊 <b>Aylık Bütçe Limitleri:</b>\n"]
+                for b in budgets:
+                    alert = svc.check_budget_alert(conn, b["category"], month)
+                    status = "🚨" if alert and "aşıldı" in alert else ("⚠️" if alert else "✅")
+                    lines.append(f"{status} {b['category']}: {b['monthly_limit']:.0f} TL/ay")
+                await send_message("\n".join(lines), chat_id=chat_id)
+        return
+
+    # ── Ses mesajı ────────────────────────────────────────────────────────────
+    if voice:
+        processing = await send_message("🎤 Ses işleniyor...", chat_id=chat_id)
+        processing_id: Optional[int] = processing.get("result", {}).get("message_id")
+        try:
+            text = await _transcribe_voice(voice["file_id"])
+            if processing_id:
+                await edit_message(chat_id, processing_id, f"🎤 <i>{text}</i>\n⏳ İşleniyor...")
+        except Exception as e:
+            if processing_id:
+                await edit_message(chat_id, processing_id, f"❌ Ses dosyası işlenemedi: {e}")
+            return
+
+    # ── AI ile işle ───────────────────────────────────────────────────────────
+    if not voice:
+        processing = await send_message("⏳ İşleniyor...", chat_id=chat_id)
+        processing_id = processing.get("result", {}).get("message_id") if processing.get("ok") else None
 
     from ai_router import route_message
+    response_text = await route_message(text, chat_id)
 
-    response_text = await route_message(text)
-
-    # İşleniyor mesajını cevapla güncelle
     if processing_id:
         await edit_message(chat_id, processing_id, response_text)
     else:
@@ -147,7 +252,6 @@ async def _handle_message(message: Dict[str, Any]):
 
 
 async def _handle_callback_query(callback_query: Dict[str, Any]):
-    """Inline buton basımlarını işler: tamamla ve ertele"""
     cb_id = callback_query["id"]
     chat_id = str(callback_query["message"]["chat"]["id"])
     message_id = callback_query["message"]["message_id"]
