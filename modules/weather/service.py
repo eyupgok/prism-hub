@@ -2,9 +2,9 @@ import os
 import httpx
 from typing import Dict, Any
 
-WEATHER_LAT = float(os.getenv("WEATHER_LAT", "41.0082"))
-WEATHER_LON = float(os.getenv("WEATHER_LON", "28.9784"))
-WEATHER_CITY = os.getenv("WEATHER_CITY", "İstanbul")
+WEATHER_LAT = float(os.getenv("WEATHER_LAT", "38.6748"))
+WEATHER_LON = float(os.getenv("WEATHER_LON", "39.2225"))
+WEATHER_CITY = os.getenv("WEATHER_CITY", "Elazığ")
 
 # WMO Hava Durumu Yorumu Kodları → Türkçe
 WMO_DESCRIPTIONS = {
