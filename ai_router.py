@@ -1,9 +1,9 @@
 import os
 import json
-import httpx
 from datetime import datetime
 from typing import Dict, Any
 import pytz
+from groq import AsyncGroq
 
 TZ = pytz.timezone("Europe/Istanbul")
 
@@ -87,50 +87,34 @@ Selamlaşma, teşekkür, "nasılsın" gibi sorulara da sohbet modunda yanıt ver
 """
 
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
-def _gemini_headers() -> dict:
-    key = os.getenv("GEMINI_API_KEY", "")
+def _groq_client() -> AsyncGroq:
+    key = os.getenv("GROQ_API_KEY", "")
     if not key:
-        raise RuntimeError("GEMINI_API_KEY ortam değişkeni ayarlanmamış")
-    return {"x-goog-api-key": key, "Content-Type": "application/json"}
+        raise RuntimeError("GROQ_API_KEY ortam değişkeni ayarlanmamış")
+    return AsyncGroq(api_key=key)
 
 
 async def parse_message(user_message: str) -> Dict[str, Any]:
-    """Kullanıcı mesajını Gemini'ye gönderir ve JSON komut olarak döner"""
+    """Kullanıcı mesajını Groq'a gönderir ve JSON komut olarak döner"""
     now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     today_str = datetime.now(TZ).strftime("%Y-%m-%d")
     system = SYSTEM_PROMPT.format(now=now_str, today=today_str)
 
-    payload = {
-        "system_instruction": {
-            "parts": [{"text": system}]
-        },
-        "contents": [
-            {"role": "user", "parts": [{"text": user_message}]}
+    client = _groq_client()
+    response = await client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_message},
         ],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 300,
-        },
-    }
+        temperature=0.1,
+        max_tokens=300,
+    )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(GEMINI_URL, headers=_gemini_headers(), json=payload)
-
-    if not resp.is_success:
-        # Gerçek Gemini hata mesajını göster
-        try:
-            err_body = resp.json()
-            err_msg = err_body.get("error", {}).get("message", resp.text)
-        except Exception:
-            err_msg = resp.text
-        raise RuntimeError(f"Gemini API hatası [{resp.status_code}]: {err_msg}")
-
-    data = resp.json()
-
-    raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    raw = response.choices[0].message.content.strip()
 
     # Markdown code block varsa temizle
     if "```" in raw:
