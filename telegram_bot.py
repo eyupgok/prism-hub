@@ -83,8 +83,8 @@ async def set_webhook(webhook_url: str):
 
 
 async def _transcribe_voice(file_id: str) -> str:
-    """Telegram ses dosyasını Groq Whisper ile metne çevirir"""
-    from groq import AsyncGroq
+    """Telegram ses dosyasını indirir ve Groq Whisper ile metne çevirir"""
+    from modules.chat.service import transcribe_audio
 
     # Telegram'dan dosya yolunu al
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -99,14 +99,7 @@ async def _transcribe_voice(file_id: str) -> str:
         resp = await client.get(file_url)
         audio_bytes = resp.content
 
-    # Groq Whisper ile transkripsiyon
-    groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY", ""))
-    result = await groq_client.audio.transcriptions.create(
-        file=("voice.ogg", audio_bytes, "audio/ogg"),
-        model="whisper-large-v3-turbo",
-        language="tr",
-    )
-    return result.text.strip()
+    return await transcribe_audio(audio_bytes)
 
 
 @router.post("/webhook")

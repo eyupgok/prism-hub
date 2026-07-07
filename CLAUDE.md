@@ -17,6 +17,7 @@ Railway'de deploy edilmiş, SQLite tabanlı, modüler FastAPI uygulaması.
 
 ```
 main.py              → FastAPI app, lifespan, tüm router'lar, CORS
+auth.py              → X-API-Key doğrulama (tüm /api/* rotaları korur; API_KEY boşsa devre dışı)
 database.py          → SQLite bağlantı, get_db() context manager, konuşma geçmişi
 ai_router.py         → Groq NLP parsing, JSON dispatch, route_message()
 telegram_bot.py      → /webhook endpoint, hızlı komutlar, ses transkripsiyon, callback
@@ -26,6 +27,9 @@ Procfile
 .env.example
 
 modules/
+  chat/
+    service.py  → Groq Whisper transkripsiyon (Telegram + REST ortak kullanır)
+    routes.py   → POST /api/chat (metin), POST /api/chat/voice (ses upload) — mobil/web istemciler
   reminders/
     models.py   → CREATE TABLE reminders (id, title, due_datetime, priority,
                    is_completed, last_notified_at, snooze_count, recurrence, created_at)
@@ -123,6 +127,7 @@ Callback handler (`_handle_callback_query`): inline button data formatı:
 TELEGRAM_TOKEN      → Bot token
 TELEGRAM_CHAT_ID    → Yetkili kullanıcı chat ID (güvenlik için zorunlu)
 GROQ_API_KEY        → Groq API key (LLM + Whisper)
+API_KEY             → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal)
 WEBHOOK_URL         → Railway app URL (Telegram webhook için, örn: https://xxx.railway.app)
 WEATHER_CITY        → Elazığ  (varsayılan)
 WEATHER_LAT         → 38.6748 (varsayılan)

@@ -1,15 +1,17 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
 
+from auth import verify_api_key
 from database import init_db
 from scheduler import start_scheduler, stop_scheduler
 from telegram_bot import router as telegram_router, set_webhook
+from modules.chat.routes import router as chat_router
 from modules.reminders.routes import router as reminders_router
 from modules.notes.routes import router as notes_router
 from modules.expenses.routes import router as expenses_router
@@ -21,6 +23,9 @@ from modules.summary.routes import router as summary_router
 async def lifespan(app: FastAPI):
     init_db()
     start_scheduler()
+
+    if not os.getenv("API_KEY", ""):
+        print("⚠️  API_KEY ayarlanmamış — REST API doğrulaması DEVRE DIŞI (sadece lokal geliştirme için uygundur)")
 
     webhook_url = os.getenv("WEBHOOK_URL", "").rstrip("/")
     if webhook_url:
@@ -48,12 +53,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# /webhook API key gerektirmez (Telegram çağırır); tüm /api/* rotaları korunur
+protected = [Depends(verify_api_key)]
+
 app.include_router(telegram_router)
-app.include_router(reminders_router)
-app.include_router(notes_router)
-app.include_router(expenses_router)
-app.include_router(weather_router)
-app.include_router(summary_router)
+app.include_router(chat_router, dependencies=protected)
+app.include_router(reminders_router, dependencies=protected)
+app.include_router(notes_router, dependencies=protected)
+app.include_router(expenses_router, dependencies=protected)
+app.include_router(weather_router, dependencies=protected)
+app.include_router(summary_router, dependencies=protected)
 
 
 @app.get("/health")
