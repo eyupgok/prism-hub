@@ -37,13 +37,43 @@ def list_notes(conn: sqlite3.Connection, category: Optional[str] = None) -> List
     return [dict(r) for r in rows]
 
 
-def search_notes(conn: sqlite3.Connection, query: str) -> List[Dict[str, Any]]:
-    """Başlık veya içerikte arama yapar"""
-    rows = conn.execute(
-        "SELECT * FROM notes WHERE title LIKE ? OR content LIKE ? ORDER BY created_at DESC",
-        (f"%{query}%", f"%{query}%"),
-    ).fetchall()
-    return [dict(r) for r in rows]
+def search_notes(
+    conn: sqlite3.Connection,
+    query: str,
+    category: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Başlık veya içerikte arama yapar; istenirse kategoriyle daraltır"""
+    sql = "SELECT * FROM notes WHERE (title LIKE ? OR content LIKE ?)"
+    params: list = [f"%{query}%", f"%{query}%"]
+    if category:
+        sql += " AND category = ?"
+        params.append(category)
+    sql += " ORDER BY created_at DESC"
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def update_note(
+    conn: sqlite3.Connection,
+    note_id: int,
+    title: Optional[str] = None,
+    content: Optional[str] = None,
+    category: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    fields, values = [], []
+    if title is not None:
+        fields.append("title = ?")
+        values.append(title)
+    if content is not None:
+        fields.append("content = ?")
+        values.append(content)
+    if category is not None:
+        fields.append("category = ?")
+        values.append(category)
+    if not fields:
+        return get_note_by_id(conn, note_id)
+    values.append(note_id)
+    conn.execute(f"UPDATE notes SET {', '.join(fields)} WHERE id = ?", values)
+    return get_note_by_id(conn, note_id)
 
 
 def delete_note(conn: sqlite3.Connection, note_id: int) -> bool:

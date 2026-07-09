@@ -6,7 +6,7 @@ Railway'de deploy edilmiş, SQLite tabanlı, modüler FastAPI uygulaması.
 ## Stack
 
 - **Backend:** Python 3.11 + FastAPI
-- **AI:** Groq API — `llama-3.3-70b-versatile` (NLP parsing) + `whisper-large-v3-turbo` (ses transkripsiyon)
+- **AI:** Groq API — `llama-3.3-70b-versatile` (NLP parsing) + `whisper-large-v3-turbo` (ses transkripsiyon) + `meta-llama/llama-4-scout-17b-16e-instruct` (görsel analiz)
 - **DB:** SQLite (WAL mode) — `prism.db`
 - **Zamanlayıcı:** APScheduler (AsyncIOScheduler)
 - **Deploy:** Railway — `Procfile` ile `uvicorn main:app`
@@ -16,33 +16,36 @@ Railway'de deploy edilmiş, SQLite tabanlı, modüler FastAPI uygulaması.
 ## Dosya Yapısı
 
 ```
-main.py              → FastAPI app, lifespan, tüm router'lar, CORS
+main.py              → FastAPI app, lifespan, tüm router'lar, CORS (CORS_ORIGINS env)
 auth.py              → X-API-Key doğrulama (tüm /api/* rotaları korur; API_KEY boşsa devre dışı)
-database.py          → SQLite bağlantı, get_db() context manager, konuşma geçmişi
-ai_router.py         → Groq NLP parsing, JSON dispatch, route_message()
-telegram_bot.py      → /webhook endpoint, hızlı komutlar, ses transkripsiyon, callback
-scheduler.py         → Her 5 dk hatırlatıcı kontrolü, 08:00 sabah özeti
+database.py          → SQLite bağlantı, get_db() context manager, konuşma geçmişi + temizlik
+ai_router.py         → Groq NLP parsing, JSON dispatch, route_message(), _esc() HTML escape
+telegram_bot.py      → /webhook (secret token doğrulama + BackgroundTasks), hızlı komutlar,
+                       ses transkripsiyon, fotoğraf → vision analizi, callback
+scheduler.py         → Her 1 dk hatırlatıcı kontrolü, 08:00 sabah özeti, 03:00 konuşma temizliği
 requirements.txt
 Procfile
 .env.example
 
 modules/
   chat/
-    service.py  → Groq Whisper transkripsiyon (Telegram + REST ortak kullanır)
-    routes.py   → POST /api/chat (metin), POST /api/chat/voice (ses upload) — mobil/web istemciler
+    service.py  → Groq Whisper transkripsiyon + describe_image() vision analizi
+                   (Telegram + REST ortak kullanır)
+    routes.py   → POST /api/chat (metin), /api/chat/voice (ses), /api/chat/image (görsel)
   reminders/
     models.py   → CREATE TABLE reminders (id, title, due_datetime, priority,
                    is_completed, last_notified_at, snooze_count, recurrence, created_at)
-    service.py  → CRUD + öncelik bazlı bildirim sistemi + snooze + tekrarlayan
-    routes.py   → FastAPI router (/reminders/*)
+    service.py  → CRUD + öncelik bazlı bildirim + snooze + tekrarlayan
+                   (complete_reminder tekrarlayanı öldürmez, sonraki periyoda öteler)
+    routes.py   → FastAPI router (/api/reminders/*, PUT update dahil)
   notes/
     models.py   → CREATE TABLE notes (id, title, content, category, created_at)
-    service.py  → CRUD + search
+    service.py  → CRUD + update + search (kategori filtreli)
     routes.py
   expenses/
     models.py   → CREATE TABLE expenses + budgets (id, category, monthly_limit, created_at)
     service.py  → CRUD + aylık özet + bütçe limiti + uyarı sistemi
-    routes.py
+    routes.py   → router (/api/expenses/*) + budget_router (/api/budget/*)
   weather/
     service.py  → Open-Meteo API, WMO kod → Türkçe, format fonksiyonu
     routes.py
@@ -50,8 +53,11 @@ modules/
     service.py  → Hava + görevler + harcama + notlar birleştirme
     routes.py
 
-static/
-  index.html   → Tek sayfa web panel, dark tema, vanilla JS
+frontend/            → React 18 + Vite + Tailwind web panel (ayrı Railway servisi)
+  src/api/client.js  → fetch sarmalayıcı, X-API-Key header (VITE_API_KEY)
+  src/pages/         → Dashboard, Reminders, Notes, Expenses, Settings
+
+mobileapp/           → Android Studio şablonu (Jetpack Compose, henüz kodlanmadı)
 ```
 
 ## Veritabanı Tabloları
@@ -84,28 +90,37 @@ conversations (id, chat_id, role[user|assistant], content, created_at)
 
 **Modüller ve aksiyonlar:**
 ```
-reminders.create / list / update / complete / delete
-notes.create / read / list / search / delete
-expenses.create / list / summary / delete
+reminders.create / list / update / complete / delete   (update recurrence destekler)
+notes.create / read / list / search / update / delete
+expenses.create / list / summary / delete              (create expense_date destekler — "dün")
 budget.set / list / delete
 weather.get
 summary.get
 chat.respond
 ```
 
+**Görsel mesajlar:** Fotoğraf geldiğinde önce `describe_image()` (vision modeli) Türkçe analiz üretir;
+analiz `[Görsel analizi]: ...` bloğu olarak kullanıcı mesajına eklenip normal pipeline'a girer.
+Fiş/fatura ise router harcama kaydeder, soru sorulmuşsa chat modunda yanıtlar.
+
 **Önemli:** `dispatch()` içindeki `chat` modülü Groq'tan gelen serbest metin yanıtını doğrudan döner.
 Hiçbir kategoriye girmeyen mesajlar için PRISM sohbet moduna geçer.
 
 ## Telegram Bot Akışı
 
-`telegram_bot.py` — `_handle_message()` sırası:
+`telegram_bot.py` — `/webhook` önce `X-Telegram-Bot-Api-Secret-Token` header'ını doğrular
+(`TELEGRAM_WEBHOOK_SECRET` boşsa atlanır), update'i `BackgroundTasks`'e atıp hemen 200 döner
+(Telegram retry → çift işlem riski yok). `_handle_message()` sırası:
 
 1. Güvenlik: sadece `TELEGRAM_CHAT_ID`'e eşit chat_id kabul edilir
 2. Hızlı komutlar kontrol edilir (Groq bypass): `/start /hava /ozet /liste /hatirlaticilar /notlar /butce`
 3. Ses mesajı varsa: `_transcribe_voice(file_id)` → Groq Whisper → metin
-4. "⏳ İşleniyor..." mesajı gönderilir, mesaj ID'si alınır
-5. `route_message(text, chat_id)` çağrılır
-6. Sonuç `edit_message()` ile "⏳ İşleniyor..." üzerine yazılır
+4. Fotoğraf varsa: en büyük boyut indirilir → `describe_image()` → `[Görsel analizi]: ...` metni
+5. "⏳ İşleniyor..." mesajı gönderilir, mesaj ID'si alınır
+6. `route_message(text, chat_id)` çağrılır
+7. Sonuç `edit_message()` ile "⏳ İşleniyor..." üzerine yazılır
+
+Kullanıcı içeriği Telegram HTML parse_mode'a `html.escape()` ile gider (ai_router `_esc()`).
 
 Callback handler (`_handle_callback_query`): inline button data formatı:
 - `complete_{id}` → hatırlatıcıyı tamamla
@@ -113,8 +128,9 @@ Callback handler (`_handle_callback_query`): inline button data formatı:
 
 ## Zamanlayıcı (scheduler.py)
 
-- **Her 5 dakika:** `check_reminders()` → bildirim zamanı gelen hatırlatıcıları bulur, Telegram'a gönderir, `last_notified_at` günceller. Tekrarlayan hatırlatıcı vadesi geçtiyse `reschedule_recurring()` ile bir sonraki periyoda öteler.
+- **Her 1 dakika:** `check_reminders()` → bildirim zamanı gelen hatırlatıcıları bulur, Telegram'a gönderir, `last_notified_at` günceller. Tekrarlayan hatırlatıcı vadesi geçtiyse `reschedule_recurring()` ile bir sonraki periyoda öteler.
 - **Her gün 08:00 (Europe/Istanbul):** `send_morning_summary()` → hava + görevler + harcama + notlar özetini Telegram'a gönderir.
+- **Her gece 03:00:** `cleanup_conversations()` → 30 günden eski konuşma kayıtlarını siler.
 
 **Öncelik bazlı bildirim sıklığı** (`get_notification_interval()`):
 - Kritik (1): son 1 saatte 15 dk'da bir, 1-3 saatte 30 dk'da bir...
@@ -124,15 +140,18 @@ Callback handler (`_handle_callback_query`): inline button data formatı:
 ## Environment Variables
 
 ```
-TELEGRAM_TOKEN      → Bot token
-TELEGRAM_CHAT_ID    → Yetkili kullanıcı chat ID (güvenlik için zorunlu)
-GROQ_API_KEY        → Groq API key (LLM + Whisper)
-API_KEY             → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal)
-WEBHOOK_URL         → Railway app URL (Telegram webhook için, örn: https://xxx.railway.app)
-WEATHER_CITY        → Elazığ  (varsayılan)
-WEATHER_LAT         → 38.6748 (varsayılan)
-WEATHER_LON         → 39.2225 (varsayılan)
-DATABASE_PATH       → prism.db (varsayılan)
+TELEGRAM_TOKEN           → Bot token
+TELEGRAM_CHAT_ID         → Yetkili kullanıcı chat ID (güvenlik için zorunlu)
+TELEGRAM_WEBHOOK_SECRET  → Webhook imza doğrulaması (boşsa devre dışı; Railway'de ayarla!)
+GROQ_API_KEY             → Groq API key (LLM + Whisper + Vision)
+GROQ_VISION_MODEL        → Görsel analiz modeli (varsayılan: meta-llama/llama-4-scout-17b-16e-instruct)
+API_KEY                  → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal)
+WEBHOOK_URL              → Railway app URL (Telegram webhook için, örn: https://xxx.railway.app)
+CORS_ORIGINS             → İzin verilen origin'ler, virgülle ayrılır (boşsa hepsi serbest)
+WEATHER_CITY             → Elazığ  (varsayılan)
+WEATHER_LAT              → 38.6748 (varsayılan)
+WEATHER_LON              → 39.2225 (varsayılan)
+DATABASE_PATH            → prism.db (varsayılan)
 ```
 ## Yeni Modül Eklemek
 

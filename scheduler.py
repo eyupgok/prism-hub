@@ -29,6 +29,18 @@ async def check_reminders():
             print(f"❌ Bildirim gönderilemedi [ID={reminder['id']}]: {e}")
 
 
+async def cleanup_conversations():
+    """Her gece 03:00'te 30 günden eski konuşma kayıtlarını temizler"""
+    from database import delete_old_conversations
+
+    try:
+        deleted = delete_old_conversations(30)
+        if deleted:
+            print(f"🧹 {deleted} eski konuşma kaydı silindi")
+    except Exception as e:
+        print(f"❌ Konuşma temizliği başarısız: {e}")
+
+
 async def send_morning_summary():
     """Her sabah 08:00'de (Istanbul) günlük özet gönderir"""
     from modules.summary import service as summary_svc
@@ -60,8 +72,16 @@ def start_scheduler():
         max_instances=1,
     )
 
+    scheduler.add_job(
+        cleanup_conversations,
+        CronTrigger(hour=3, minute=0, timezone=TZ),
+        id="cleanup_conversations",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     scheduler.start()
-    print("✅ Zamanlayıcı başlatıldı (hatırlatıcı kontrolü: 1 dk, sabah özeti: 08:00)")
+    print("✅ Zamanlayıcı başlatıldı (hatırlatıcı kontrolü: 1 dk, sabah özeti: 08:00, temizlik: 03:00)")
 
 
 def stop_scheduler():

@@ -28,7 +28,7 @@ export default function Notes() {
     setError(null)
     const t = setTimeout(() => {
       const req = search.trim()
-        ? api.searchNotes(search.trim())
+        ? api.searchNotes(search.trim(), category)
         : api.getNotes(category)
       req
         .then(setNotes)
@@ -40,7 +40,7 @@ export default function Notes() {
 
   const refresh = () => {
     setLoading(true)
-    const req = search.trim() ? api.searchNotes(search.trim()) : api.getNotes(category)
+    const req = search.trim() ? api.searchNotes(search.trim(), category) : api.getNotes(category)
     req.then(setNotes).catch(e => setError(e.message)).finally(() => setLoading(false))
   }
 

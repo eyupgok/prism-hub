@@ -1,3 +1,4 @@
+import html
 import os
 import json
 from datetime import datetime
@@ -6,6 +7,11 @@ import pytz
 from groq import AsyncGroq
 
 TZ = pytz.timezone("Europe/Istanbul")
+
+
+def _esc(value: Any) -> str:
+    """Kullanıcı içeriğini Telegram HTML parse_mode için güvenli hale getirir"""
+    return html.escape(str(value if value is not None else ""))
 
 SYSTEM_PROMPT = """\
 Sen PRISM'sin — Eyüp'ün kişisel AI asistanı. Görevin Eyüp'ün günlük hayatını organize etmek: hatırlatıcılar, notlar, harcamalar, bütçe, hava durumu ve günlük özet.
@@ -22,7 +28,7 @@ Eyüp Türkçe konuşur. Mesajları analiz et ve SADECE JSON formatında yanıt 
 
 reminders.create → title(str), due_datetime(ISO 8601: {today}T14:30:00), priority(1=Kritik 2=Önemli 3=Normal), recurrence(none|daily|weekly|monthly)
 reminders.list → params boş
-reminders.update → id(int), title(str opsiyonel), due_datetime(ISO 8601 opsiyonel), priority(int opsiyonel)
+reminders.update → id(int), title(str opsiyonel), due_datetime(ISO 8601 opsiyonel), priority(int opsiyonel), recurrence(none|daily|weekly|monthly opsiyonel)
 reminders.complete → id(int)
 reminders.delete → id(int)
 
@@ -30,9 +36,10 @@ notes.create → title(str), content(str), category(iş|kişisel|genel|ders|fiki
 notes.list → category(str opsiyonel)
 notes.read → id(int)
 notes.search → query(str)
+notes.update → id(int), title(str opsiyonel), content(str opsiyonel), category(str opsiyonel)
 notes.delete → id(int)
 
-expenses.create → amount(float), category(yemek|ulaşım|eğlence|fatura|alışveriş|diğer), description(str opsiyonel)
+expenses.create → amount(float), category(yemek|ulaşım|eğlence|fatura|alışveriş|diğer), description(str opsiyonel), expense_date(YYYY-MM-DD opsiyonel — sadece geçmiş bir günden bahsediliyorsa doldur)
 expenses.list → month(YYYY-MM opsiyonel)
 expenses.summary → month(YYYY-MM opsiyonel)
 expenses.delete → id(int)
@@ -92,6 +99,17 @@ Tekrarlama belirleme:
 ## HARCAMA KURALLARI
 Şu ifadeler harcama anlamına gelir:
 "harcadım", "ödedim", "aldım", "TL", "lira", "para"
+
+Geçmiş tarihli harcama:
+- "dün 200 TL harcadım" → expense_date: dünün tarihi (YYYY-MM-DD)
+- "geçen cuma", "3 gün önce" vb. → ilgili günün tarihi
+- Tarihten bahsedilmiyorsa expense_date gönderme (bugün varsayılır)
+
+## GÖRSEL MESAJLAR
+Kullanıcı fotoğraf gönderirse mesajda "[Görsel analizi]: ..." bloğu bulunur — bu, gönderilen fotoğrafın içeriğidir.
+- Fiş/fatura analiziyse ve kullanıcı kaydetmek istiyorsa (veya sadece fiş gönderip hiçbir şey yazmadıysa) expenses.create kullan: tutar, kategori, işyeri adını description'a, fişteki tarih bugünden farklıysa expense_date'e yaz.
+- Kullanıcı görselle ilgili soru soruyorsa chat.respond ile görsel analizine dayanarak yanıtla.
+- Kullanıcı "not al" diyorsa görseldeki metni notes.create ile kaydet.
 
 ## SOHBET
 Eğer mesaj hiçbir kategoriye girmiyorsa, PRISM olarak samimi ve kısa Türkçe yanıt ver:
@@ -157,7 +175,7 @@ async def dispatch(parsed: Dict[str, Any]) -> str:
 
     try:
         if module == "chat":
-            return params.get("message", "Nasıl yardımcı olabilirim?")
+            return _esc(params.get("message", "Nasıl yardımcı olabilirim?"))
 
         if module == "reminders":
             return await _handle_reminders(action, params)
@@ -202,7 +220,7 @@ async def _handle_reminders(action: str, params: Dict) -> str:
             due = svc.parse_dt(r["due_datetime"])
             msg = (
                 f"✅ Hatırlatıcı oluşturuldu!\n"
-                f"📌 {r['title']}\n"
+                f"📌 {_esc(r['title'])}\n"
                 f"📅 {svc.format_dt(due)}\n"
                 f"🏷 {svc.PRIORITY_NAMES.get(r['priority'], 'Normal')}"
             )
@@ -220,7 +238,7 @@ async def _handle_reminders(action: str, params: Dict) -> str:
                 due = svc.parse_dt(r["due_datetime"])
                 emoji = svc.PRIORITY_EMOJIS.get(r["priority"], "🟢")
                 rec = " 🔁" if r.get("recurrence", "none") != "none" else ""
-                lines.append(f"{emoji} [{r['id']}] {r['title']} — {svc.format_dt(due)}{rec}")
+                lines.append(f"{emoji} [{r['id']}] {_esc(r['title'])} — {svc.format_dt(due)}{rec}")
             return "\n".join(lines)
 
         if action == "update":
@@ -236,14 +254,19 @@ async def _handle_reminders(action: str, params: Dict) -> str:
             due = svc.parse_dt(r["due_datetime"])
             return (
                 f"✏️ Hatırlatıcı güncellendi!\n"
-                f"📌 {r['title']}\n"
+                f"📌 {_esc(r['title'])}\n"
                 f"📅 {svc.format_dt(due)}\n"
                 f"🏷 {svc.PRIORITY_NAMES.get(r['priority'], 'Normal')}"
             )
 
         if action == "complete":
             r = svc.complete_reminder(conn, params.get("id"))
-            return f"✅ '{r['title']}' tamamlandı!" if r else "❌ Hatırlatıcı bulunamadı."
+            if not r:
+                return "❌ Hatırlatıcı bulunamadı."
+            if r.get("rescheduled"):
+                due = svc.parse_dt(r["due_datetime"])
+                return f"✅ '{_esc(r['title'])}' tamamlandı!\n🔁 Sonraki tekrar: {svc.format_dt(due)}"
+            return f"✅ '{_esc(r['title'])}' tamamlandı!"
 
         if action == "delete":
             ok = svc.delete_reminder(conn, params.get("id"))
@@ -259,31 +282,43 @@ async def _handle_notes(action: str, params: Dict) -> str:
     with get_db() as conn:
         if action == "create":
             n = svc.create_note(conn, params["title"], params["content"], params.get("category", "genel"))
-            return f"📝 Not kaydedildi!\n📌 {n['title']}\n🏷 {n['category']}"
+            return f"📝 Not kaydedildi!\n📌 {_esc(n['title'])}\n🏷 {n['category']}"
 
         if action == "read":
             n = svc.get_note_by_id(conn, params.get("id"))
             if not n:
                 return "❌ Not bulunamadı."
-            return f"📝 <b>{n['title']}</b>\n🏷 {n['category']}\n\n{n['content']}"
+            return f"📝 <b>{_esc(n['title'])}</b>\n🏷 {n['category']}\n\n{_esc(n['content'])}"
 
         if action == "list":
             cat = params.get("category")
             notes = svc.list_notes(conn, cat)
             if not notes:
                 return "📝 Not bulunamadı."
-            header = f"📝 <b>Notlar{' — ' + cat if cat else ''}:</b>\n"
-            lines = [header] + [f"• [{n['id']}] {n['title']} ({n['category']})" for n in notes[:10]]
+            header = f"📝 <b>Notlar{' — ' + _esc(cat) if cat else ''}:</b>\n"
+            lines = [header] + [f"• [{n['id']}] {_esc(n['title'])} ({n['category']})" for n in notes[:10]]
             return "\n".join(lines)
 
         if action == "search":
             notes = svc.search_notes(conn, params.get("query", ""))
             if not notes:
-                return f"🔍 '{params.get('query')}' için sonuç bulunamadı."
+                return f"🔍 '{_esc(params.get('query'))}' için sonuç bulunamadı."
             lines = ["🔍 <b>Arama sonuçları:</b>\n"] + [
-                f"• [{n['id']}] {n['title']}" for n in notes[:10]
+                f"• [{n['id']}] {_esc(n['title'])}" for n in notes[:10]
             ]
             return "\n".join(lines)
+
+        if action == "update":
+            n = svc.update_note(
+                conn,
+                params.get("id"),
+                params.get("title"),
+                params.get("content"),
+                params.get("category"),
+            )
+            if not n:
+                return "❌ Not bulunamadı."
+            return f"✏️ Not güncellendi!\n📌 {_esc(n['title'])}\n🏷 {n['category']}"
 
         if action == "delete":
             ok = svc.delete_note(conn, params.get("id"))
@@ -303,11 +338,13 @@ async def _handle_expenses(action: str, params: Dict) -> str:
                 params["amount"],
                 params.get("category", "diğer"),
                 params.get("description", ""),
+                params.get("expense_date"),
             )
             msg = (
                 f"💰 Harcama kaydedildi!\n"
                 f"💵 {e['amount']:.2f} TL — {e['category']}\n"
-                f"📝 {e['description'] or '—'}"
+                f"📅 {e['expense_date']}\n"
+                f"📝 {_esc(e['description']) or '—'}"
             )
             alert = svc.check_budget_alert(conn, e["category"])
             if alert:
@@ -322,7 +359,7 @@ async def _handle_expenses(action: str, params: Dict) -> str:
             lines = ["💰 <b>Harcamalar:</b>\n"]
             for e in expenses[:10]:
                 lines.append(
-                    f"• [{e['id']}] {e['expense_date']} | {e['amount']:.0f} TL | {e['category']} | {e['description'] or '—'}"
+                    f"• [{e['id']}] {e['expense_date']} | {e['amount']:.0f} TL | {e['category']} | {_esc(e['description']) or '—'}"
                 )
             lines.append(f"\n<b>Toplam: {total:.0f} TL</b>")
             return "\n".join(lines)

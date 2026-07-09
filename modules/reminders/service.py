@@ -1,4 +1,5 @@
 import calendar
+import html
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
@@ -94,6 +95,15 @@ def list_reminders(conn: sqlite3.Connection, include_completed: bool = False) ->
 
 
 def complete_reminder(conn: sqlite3.Connection, reminder_id: int) -> Optional[Dict[str, Any]]:
+    r = get_reminder_by_id(conn, reminder_id)
+    if not r:
+        return None
+    # Tekrarlayan hatırlatıcı tamamlanınca ölmez, bir sonraki periyoda geçer
+    if r.get("recurrence", "none") != "none":
+        updated = reschedule_recurring(conn, reminder_id)
+        if updated:
+            updated["rescheduled"] = True
+            return updated
     conn.execute("UPDATE reminders SET is_completed = 1 WHERE id = ?", (reminder_id,))
     return get_reminder_by_id(conn, reminder_id)
 
@@ -109,6 +119,7 @@ def update_reminder(
     title: str = None,
     due_datetime: str = None,
     priority: int = None,
+    recurrence: str = None,
 ) -> Optional[Dict[str, Any]]:
     fields, values = [], []
     if title is not None:
@@ -123,6 +134,9 @@ def update_reminder(
     if priority is not None:
         fields.append("priority = ?")
         values.append(priority)
+    if recurrence is not None:
+        fields.append("recurrence = ?")
+        values.append(recurrence if recurrence in ("none", "daily", "weekly", "monthly") else "none")
     if not fields:
         return get_reminder_by_id(conn, reminder_id)
     values.append(reminder_id)
@@ -142,8 +156,25 @@ def snooze_reminder(conn: sqlite3.Connection, reminder_id: int, minutes: int) ->
     return get_reminder_by_id(conn, reminder_id)
 
 
+def _advance_period(due: datetime, recurrence: str) -> datetime:
+    if recurrence == "daily":
+        return due + timedelta(days=1)
+    if recurrence == "weekly":
+        return due + timedelta(weeks=1)
+    if recurrence == "monthly":
+        year, month = due.year, due.month + 1
+        if month > 12:
+            month, year = 1, year + 1
+        last_day = calendar.monthrange(year, month)[1]
+        return due.replace(year=year, month=month, day=min(due.day, last_day))
+    return due
+
+
 def reschedule_recurring(conn: sqlite3.Connection, reminder_id: int) -> Optional[Dict[str, Any]]:
-    """Tekrarlayan hatırlatıcıyı bir sonraki periyoda öteler"""
+    """Tekrarlayan hatırlatıcıyı bir sonraki periyoda öteler.
+
+    Erken tamamlamada da çalışsın diye her zaman en az bir periyot ilerletir.
+    """
     r = get_reminder_by_id(conn, reminder_id)
     if not r or r.get("recurrence", "none") == "none":
         return None
@@ -152,19 +183,9 @@ def reschedule_recurring(conn: sqlite3.Connection, reminder_id: int) -> Optional
     now = now_local()
     recurrence = r["recurrence"]
 
+    due = _advance_period(due, recurrence)
     while due <= now:
-        if recurrence == "daily":
-            due = due + timedelta(days=1)
-        elif recurrence == "weekly":
-            due = due + timedelta(weeks=1)
-        elif recurrence == "monthly":
-            year, month = due.year, due.month + 1
-            if month > 12:
-                month, year = 1, year + 1
-            last_day = calendar.monthrange(year, month)[1]
-            due = due.replace(year=year, month=month, day=min(due.day, last_day))
-        else:
-            break
+        due = _advance_period(due, recurrence)
 
     conn.execute(
         "UPDATE reminders SET due_datetime = ?, last_notified_at = NULL, is_completed = 0 WHERE id = ?",
@@ -216,7 +237,7 @@ def format_reminder_notification(reminder: Dict[str, Any]) -> Tuple[str, List]:
     recurrence_label = RECURRENCE_LABELS.get(reminder.get("recurrence", "none"), "")
 
     text = (
-        f"{emoji} <b>{reminder['title']}</b>\n"
+        f"{emoji} <b>{html.escape(reminder['title'])}</b>\n"
         f"📅 {format_dt(due)} — {format_time_remaining(minutes_remaining)}\n"
         f"🏷 {priority_name}"
     )

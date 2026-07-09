@@ -14,6 +14,12 @@ class NoteCreate(BaseModel):
     category: str = "genel"
 
 
+class NoteUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+
+
 @router.post("/")
 def create_note(data: NoteCreate):
     with get_db() as conn:
@@ -21,9 +27,12 @@ def create_note(data: NoteCreate):
 
 
 @router.get("/search")
-def search_notes(q: str = Query(..., description="Arama terimi")):
+def search_notes(
+    q: str = Query(..., description="Arama terimi"),
+    category: Optional[str] = None,
+):
     with get_db() as conn:
-        return service.search_notes(conn, q)
+        return service.search_notes(conn, q, category)
 
 
 @router.get("/")
@@ -39,6 +48,14 @@ def get_note(note_id: int):
     if not result:
         raise HTTPException(status_code=404, detail="Not bulunamadı")
     return result
+
+
+@router.put("/{note_id}")
+def update_note(note_id: int, data: NoteUpdate):
+    with get_db() as conn:
+        if not service.get_note_by_id(conn, note_id):
+            raise HTTPException(status_code=404, detail="Not bulunamadı")
+        return service.update_note(conn, note_id, data.title, data.content, data.category)
 
 
 @router.delete("/{note_id}")

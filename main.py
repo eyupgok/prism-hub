@@ -14,7 +14,7 @@ from telegram_bot import router as telegram_router, set_webhook
 from modules.chat.routes import router as chat_router
 from modules.reminders.routes import router as reminders_router
 from modules.notes.routes import router as notes_router
-from modules.expenses.routes import router as expenses_router
+from modules.expenses.routes import router as expenses_router, budget_router
 from modules.weather.routes import router as weather_router
 from modules.summary.routes import router as summary_router
 
@@ -45,10 +45,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: CORS_ORIGINS env'i virgülle ayrılmış origin listesi (örn: frontend URL'i).
+# Boş bırakılırsa tüm origin'lere izin verilir. Auth cookie değil header tabanlı
+# olduğundan allow_credentials kapalı ("*" + credentials geçersiz kombinasyondu).
+_cors_origins = [o.strip().rstrip("/") for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -61,6 +65,7 @@ app.include_router(chat_router, dependencies=protected)
 app.include_router(reminders_router, dependencies=protected)
 app.include_router(notes_router, dependencies=protected)
 app.include_router(expenses_router, dependencies=protected)
+app.include_router(budget_router, dependencies=protected)
 app.include_router(weather_router, dependencies=protected)
 app.include_router(summary_router, dependencies=protected)
 

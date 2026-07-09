@@ -50,3 +50,36 @@ async def chat_voice(file: UploadFile = File(...), chat_id: str = Form("mobile")
 
     response = await route_message(text, chat_id)
     return {"transcript": text, "response": response}
+
+
+@router.post("/image")
+async def chat_image(
+    file: UploadFile = File(...),
+    message: str = Form(""),
+    chat_id: str = Form("mobile"),
+):
+    """Görseli vision modeliyle analiz edip AI router'a iletir.
+
+    message: kullanıcının görselle birlikte yazdığı metin (opsiyonel).
+    Dönen 'description' görsel analizi, 'response' PRISM'in nihai yanıtıdır.
+    """
+    from ai_router import route_message
+    from modules.chat.service import describe_image
+
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Görsel dosyası boş")
+
+    content_type = file.content_type or "image/jpeg"
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Dosya bir görsel değil")
+
+    hint = message.strip()
+    try:
+        description = await describe_image(image_bytes, hint, content_type)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Görsel analizi başarısız: {e}")
+
+    text = f"{hint}\n\n[Görsel analizi]: {description}" if hint else f"[Görsel analizi]: {description}"
+    response = await route_message(text, chat_id)
+    return {"description": description, "response": response}

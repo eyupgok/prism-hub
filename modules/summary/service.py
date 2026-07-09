@@ -1,3 +1,4 @@
+import html
 from datetime import datetime
 import pytz
 
@@ -43,7 +44,7 @@ async def get_morning_summary() -> str:
         for r in today_tasks:
             due = reminder_svc.parse_dt(r["due_datetime"])
             emoji = reminder_svc.PRIORITY_EMOJIS.get(r["priority"], "🟢")
-            lines.append(f"  {emoji} {r['title']} ({due.strftime('%H:%M')})")
+            lines.append(f"  {emoji} {html.escape(r['title'])} ({due.strftime('%H:%M')})")
     else:
         lines.append("  Bugün planlanmış görev yok")
 
@@ -64,6 +65,6 @@ async def get_morning_summary() -> str:
     if recent_notes:
         lines.append("\n📝 Son notlar:")
         for n in recent_notes:
-            lines.append(f"  • {n['title']} ({n['category']})")
+            lines.append(f"  • {html.escape(n['title'])} ({n['category']})")
 
     return "\n".join(lines)

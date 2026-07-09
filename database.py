@@ -1,7 +1,7 @@
 import sqlite3
 import os
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict
 
 import pytz
@@ -49,6 +49,14 @@ def get_recent_messages(chat_id: str, limit: int = 10) -> List[Dict]:
             (chat_id, limit),
         ).fetchall()
     return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+
+
+def delete_old_conversations(days: int = 30) -> int:
+    """Belirtilen günden eski konuşma kayıtlarını siler, silinen satır sayısını döner"""
+    cutoff = (datetime.now(_TZ) - timedelta(days=days)).isoformat()
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM conversations WHERE created_at < ?", (cutoff,))
+        return cursor.rowcount
 
 
 def init_db():

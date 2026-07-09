@@ -26,13 +26,17 @@ export const api = {
     request(`/api/reminders/${id}/complete`, { method: 'PUT' }),
   snoozeReminder: (id, minutes) =>
     request(`/api/reminders/${id}/snooze/${minutes}`, { method: 'PUT' }),
+  updateReminder: (id, data) =>
+    request(`/api/reminders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteReminder: (id) =>
     request(`/api/reminders/${id}`, { method: 'DELETE' }),
 
   getNotes: (category) =>
     request(`/api/notes/${category ? `?category=${encodeURIComponent(category)}` : ''}`),
-  searchNotes: (q) =>
-    request(`/api/notes/search?q=${encodeURIComponent(q)}`),
+  searchNotes: (q, category) =>
+    request(`/api/notes/search?q=${encodeURIComponent(q)}${category ? `&category=${encodeURIComponent(category)}` : ''}`),
+  updateNote: (id, data) =>
+    request(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   createNote: (data) =>
     request('/api/notes/', { method: 'POST', body: JSON.stringify(data) }),
   deleteNote: (id) =>
@@ -51,6 +55,12 @@ export const api = {
     request('/api/expenses/', { method: 'POST', body: JSON.stringify(data) }),
   deleteExpense: (id) =>
     request(`/api/expenses/${id}`, { method: 'DELETE' }),
+
+  getBudgets: () => request('/api/budget/'),
+  setBudget: (data) =>
+    request('/api/budget/', { method: 'PUT', body: JSON.stringify(data) }),
+  deleteBudget: (category) =>
+    request(`/api/budget/${encodeURIComponent(category)}`, { method: 'DELETE' }),
 
   getWeather: () => request('/api/weather/'),
   getSummary: () => request('/api/summary/'),
