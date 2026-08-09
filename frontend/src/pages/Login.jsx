@@ -26,10 +26,7 @@ export default function Login({ onSuccess }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4"
-      style={{
-        background:
-          'radial-gradient(1200px 600px at 50% -10%, rgba(109,40,217,0.18), transparent 60%), #0a0a0f',
-      }}>
+      style={{ background: 'var(--bg)' }}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4"

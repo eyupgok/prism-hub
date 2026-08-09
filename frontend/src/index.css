@@ -45,16 +45,6 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Sayfanın üstünden yayılan hafif mor ışıma — düz siyah zemini kırar */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background: radial-gradient(1200px 600px at 50% -15%, rgba(139, 92, 246, 0.10), transparent 60%);
-  }
-
   h1, h2, h3 {
     font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
     letter-spacing: -0.02em;
