@@ -13,7 +13,7 @@ export default function BottomNav({ active, onNavigate }) {
     <nav
       className="md:hidden fixed bottom-0 left-0 right-0 z-20 flex border-t"
       style={{
-        background: 'rgba(18, 18, 26, 0.92)',
+        background: 'rgba(10, 10, 15, 0.92)',
         backdropFilter: 'blur(20px) saturate(140%)',
         WebkitBackdropFilter: 'blur(20px) saturate(140%)',
         borderColor: 'var(--border)',

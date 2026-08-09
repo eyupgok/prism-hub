@@ -16,7 +16,7 @@ export default function Sidebar({ active, onNavigate }) {
   return (
     <aside
       className="hidden md:flex flex-col w-64 h-screen fixed left-0 top-0 z-20 border-r"
-      style={{ background: 'var(--bg-soft)', borderColor: 'var(--border)' }}
+      style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-6">
