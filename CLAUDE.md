@@ -1,15 +1,18 @@
 # PRISM — Kişisel AI Asistan Hub
 
 Eyüp'ün kişisel asistan projesi. Telegram üzerinden doğal Türkçe dille kontrol edilir.
-Railway'de deploy edilmiş, SQLite tabanlı, modüler FastAPI uygulaması.
+Oracle Cloud Always Free VM'de kendi kendine barındırılan, SQLite tabanlı, modüler FastAPI uygulaması.
 
 ## Stack
 
 - **Backend:** Python 3.11 + FastAPI
-- **AI:** Groq API — `llama-3.3-70b-versatile` (NLP parsing) + `whisper-large-v3-turbo` (ses transkripsiyon) + `meta-llama/llama-4-scout-17b-16e-instruct` (görsel analiz)
+- **AI:** Groq API — `llama-3.3-70b-versatile` (NLP parsing) + `whisper-large-v3` (ses transkripsiyon) + `qwen/qwen3.6-27b` (görsel analiz).
+  Üçü de env'den değiştirilebilir (`GROQ_MODEL`, `GROQ_WHISPER_MODEL`, `GROQ_VISION_MODEL`) —
+  Groq model emekliye ayırdığında (`model_not_found`) kod değil `.env` güncellenir.
 - **DB:** SQLite (WAL mode) — `prism.db`
 - **Zamanlayıcı:** APScheduler (AsyncIOScheduler)
-- **Deploy:** Railway — `Procfile` ile `uvicorn main:app`
+- **Deploy:** Oracle Cloud VM (Ubuntu 24.04) — systemd servisi `prism.service` + Caddy ters vekil (HTTPS).
+  `Procfile` duruyor ama kullanılmıyor (Railway kalıntısı).
 - **Hava durumu:** Open-Meteo API (kayıt gerektirmez)
 - **Telegram:** Webhook tabanlı (`/webhook` POST endpoint)
 
@@ -53,11 +56,15 @@ modules/
     service.py  → Hava + görevler + harcama + notlar birleştirme
     routes.py
 
-frontend/            → React 18 + Vite + Tailwind web panel (ayrı Railway servisi)
+frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin kökünde yayında)
   src/api/client.js  → fetch sarmalayıcı, X-API-Key header (VITE_API_KEY)
   src/pages/         → Dashboard, Reminders, Notes, Expenses, Settings
 
-mobileapp/           → Android Studio şablonu (Jetpack Compose, henüz kodlanmadı)
+mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
+  data/SettingsStore.kt      → sunucu URL + API anahtarı (DataStore)
+  data/api/                  → Retrofit client (X-API-Key interceptor), modeller
+  ui/screens/                → Chat, Reminders, Notes, Expenses, Settings
+  MainActivity.kt            → alt gezinme + sekme yönetimi
 ```
 
 ## Veritabanı Tabloları
@@ -142,11 +149,13 @@ Callback handler (`_handle_callback_query`): inline button data formatı:
 ```
 TELEGRAM_TOKEN           → Bot token
 TELEGRAM_CHAT_ID         → Yetkili kullanıcı chat ID (güvenlik için zorunlu)
-TELEGRAM_WEBHOOK_SECRET  → Webhook imza doğrulaması (boşsa devre dışı; Railway'de ayarla!)
+TELEGRAM_WEBHOOK_SECRET  → Webhook imza doğrulaması (boşsa devre dışı)
 GROQ_API_KEY             → Groq API key (LLM + Whisper + Vision)
-GROQ_VISION_MODEL        → Görsel analiz modeli (varsayılan: meta-llama/llama-4-scout-17b-16e-instruct)
+GROQ_MODEL               → Metin/komut modeli (varsayılan: llama-3.3-70b-versatile)
+GROQ_WHISPER_MODEL       → Ses transkripsiyon modeli (varsayılan: whisper-large-v3)
+GROQ_VISION_MODEL        → Görsel analiz modeli (varsayılan: qwen/qwen3.6-27b)
 API_KEY                  → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal)
-WEBHOOK_URL              → Railway app URL (Telegram webhook için, örn: https://xxx.railway.app)
+WEBHOOK_URL              → Genel HTTPS adresi (Telegram webhook için: https://kendi-alan-adin.example.com)
 CORS_ORIGINS             → İzin verilen origin'ler, virgülle ayrılır (boşsa hepsi serbest)
 WEATHER_CITY             → Elazığ  (varsayılan)
 WEATHER_LAT              → 38.6748 (varsayılan)
@@ -173,9 +182,50 @@ DATABASE_PATH            → prism.db (varsayılan)
 
 ## Deploy
 
-```
-railway up   # ya da git push ile otomatik deploy
+Sunucu: Oracle Cloud Always Free VM (`<sunucu-ip>`, Ubuntu 24.04, Frankfurt).
+Kod GitHub'dan **salt-okunur deploy key** ile iner — sunucuda geliştirme yapılmaz.
+
+```bash
+# 1) Yerelde geliştir, commit'le, push'la
+git push
+
+# 2) Sunucuda güncelle
+ssh -i prism.key ubuntu@<sunucu-ip>
+cd ~/prism && git pull
+source venv/bin/activate && pip install -r requirements.txt   # bağımlılık değiştiyse
+sudo systemctl restart prism
+sudo journalctl -u prism -n 30 --no-pager                     # doğrula
 ```
 
-Railway başlangıçta `set_webhook()` çağrılır, Telegram webhook otomatik ayarlanır.
+**Mimari:** İnternet → Caddy (443, Let's Encrypt otomatik) → `127.0.0.1:8000` uvicorn (dışarıya kapalı).
+Systemd `Restart=always` ile çöktüğünde ve yeniden başlatmada otomatik ayağa kalkar.
+
+**Sunucudaki yollar:** kod `/home/ubuntu/prism`, venv `/home/ubuntu/prism/venv`,
+gizli ayarlar `/home/ubuntu/prism/.env` (chmod 600, repoda yok), DB `/home/ubuntu/prism/prism.db`,
+servis `/etc/systemd/system/prism.service`, vekil `/etc/caddy/Caddyfile`.
+
+**Güvenlik duvarı iki katmanlı:** OCI Security List **ve** sunucunun `iptables`'ı — port açarken
+ikisinde de açman gerekir (`iptables` değişikliği sonrası `sudo netfilter-persistent save`).
+
+### Web paneli (aynı domain, kökte)
+
+Caddy tek site bloğunda yolları ayırır:
+
+| Yol | Koruma | Nereye |
+|---|---|---|
+| `/webhook*` | Telegram imzası | backend |
+| `/api/*` | `X-API-Key` (Android) | backend |
+| `/health` | yok | backend |
+| `/panel-api/*` | Basic Auth + Caddy `X-API-Key` ekler | backend (ön ek soyulur) |
+| diğer her şey | Basic Auth | `/var/www/prism-panel/dist` statik dosyalar |
+
+Panel API anahtarını **taşımaz** — `frontend/.env`'de `VITE_API_URL=/panel-api`, `VITE_API_KEY` boş.
+Anahtarı Caddy `header_up` ile ekler, böylece JS paketine hiç girmez.
+
+Panel güncelleme: PC'de `npm run build` → `scp -r frontend\dist ...:/var/www/prism-panel/` →
+sunucuda **`chmod -R a+rX /var/www/prism-panel`** (scp Windows'tan kısıtlı izinle geldiği için şart).
+
+Basic Auth geçicidir; panele giriş ekranı eklenince `basic_auth` blokları ve `/panel-api` bloğu silinir.
+
+Uygulama açılışta `set_webhook()` çağırır, Telegram webhook otomatik ayarlanır.
 Lokal test için `WEBHOOK_URL` boş bırakılabilir — webhook kurulmaz, bot Telegram'dan mesaj almaz ama API endpoint'leri çalışır.

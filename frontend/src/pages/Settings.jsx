@@ -8,11 +8,11 @@ const STACK = [
   { label: 'Veritabanı', value: 'SQLite (WAL mode)' },
   { label: 'AI / NLP', value: 'Groq — llama-3.3-70b-versatile' },
   { label: 'Ses', value: 'Groq Whisper — whisper-large-v3-turbo' },
-  { label: 'Deploy', value: 'Railway (backend + frontend)' },
+  { label: 'Deploy', value: 'Oracle Cloud VM (systemd + Caddy)' },
 ]
 
 export default function Settings() {
-  const apiUrl = import.meta.env.VITE_API_URL || '(ayarlanmamış — localhost kullanılıyor)'
+  const apiUrl = import.meta.env.VITE_API_URL || '(aynı adres — istekler panelin sunucusuna gidiyor)'
 
   return (
     <div className="space-y-6">
@@ -37,7 +37,7 @@ export default function Settings() {
             {apiUrl}
           </div>
           <p className="text-xs text-slate-700 mt-1.5">
-            Değiştirmek için Railway servis değişkenlerinden VITE_API_URL güncellenir.
+            Değiştirmek için frontend/.env dosyasındaki VITE_API_URL güncellenir ve panel yeniden derlenir.
           </p>
         </div>
       </div>
@@ -73,7 +73,8 @@ export default function Settings() {
           sahibine yanıt verir.
         </p>
         <p className="text-slate-400 text-sm leading-relaxed">
-          Web panelinde kimlik doğrulama yoktur. Railway'de özel bir URL kullanılması veya erişim kısıtlaması önerilir.
+          Panel, önünde kullanıcı adı/parola isteyen Caddy ile yayınlanır. API anahtarı tarayıcıya
+          hiç gönderilmez — istekleri backend'e iletirken anahtarı Caddy ekler.
         </p>
       </div>
 

@@ -3,8 +3,11 @@ import os
 
 from groq import AsyncGroq
 
-WHISPER_MODEL = "whisper-large-v3-turbo"
-VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+# Groq modelleri zaman zaman emekliye ayrılıyor (llama-4-scout ve whisper-large-v3-turbo
+# böyle gitti). Yenisine geçmek kod değişikliği gerektirmesin diye env'den okunuyor —
+# güncel listeyi https://api.groq.com/openai/v1/models adresinden görebilirsin.
+WHISPER_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3")
+VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 
 VISION_PROMPT = """\
 Sen bir görsel analiz asistanısın. Kullanıcının gönderdiği görseli Türkçe analiz et:

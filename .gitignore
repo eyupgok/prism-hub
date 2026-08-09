@@ -1,9 +1,21 @@
 # Ortam değişkenleri — asla commit edilmez
 .env
 
+# SSH anahtarları — asla commit edilmez
+ssh/
+*.key
+*.pem
+
+# Ekran görüntüleri (kurulum notları, repoya girmesin)
+screenshots/
+
 # Veritabanı
 *.db
 *.sqlite3
+
+# Node / frontend derleme çıktıları
+node_modules/
+.vite/
 
 # Python
 __pycache__/

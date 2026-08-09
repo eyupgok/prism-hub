@@ -125,7 +125,7 @@ Selamlaşma, teşekkür, "nasılsın" gibi sorulara da sohbet modunda yanıt ver
 - Konuşma geçmişini kullanarak "onu", "bunu", "onu sil" gibi referansları çöz\
 """
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 HISTORY_LIMIT = 10
 
 
