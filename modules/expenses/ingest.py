@@ -15,6 +15,9 @@ import hashlib
 import json
 import os
 import re
+import secrets
+import time
+from collections import OrderedDict
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -25,6 +28,10 @@ from modules.expenses import service
 
 TZ = pytz.timezone("Europe/Istanbul")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# Aynı alışverişin ikinci bildirimi sayılacağı zaman aralığı (dakika).
+# Çok geniş tutmak, aynı tutarlı iki ayrı alışverişi yanlışlıkla eler.
+DUPLICATE_WINDOW_MINUTES = int(os.getenv("EXPENSE_DUPLICATE_WINDOW_MINUTES", "5"))
 
 # Telegram callback verisi 64 bayt ile sınırlı; kategori adı yerine bu listedeki
 # sırasını gönderiyoruz (expset_<id>_<index>).
@@ -126,6 +133,66 @@ async def parse_notification(title: str, text: str) -> Dict[str, Any]:
     }
 
 
+# ── Elenen çift kayıtlar ─────────────────────────────────────────────────────
+# Çift sanıp elediğimiz kayıt aslında ayrı bir alışveriş olabilir (aynı kafede iki
+# kahve gibi). Sessizce yutmak yerine Telegram'a "yine de kaydet" butonu koyuyoruz.
+# Bellekte tutuluyor: butonun ömrü kısa, servis yeniden başlarsa düşer — kalıcı
+# saklamaya değmeyecek kadar geçici bir bilgi.
+_PENDING_TTL_SECONDS = 3600
+_PENDING_MAX = 50
+_pending_duplicates: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+
+# Çift diye elediğimiz bildirimlerin özetleri. Telefon aynı bildirimi yeniden
+# gönderirse (kuyruk yeniden denemesi, yanıtı alamadan kopan bağlantı) Telegram'a
+# ikinci kez "çift kayıt" mesajı düşmesin diye tutuluyor.
+_suppressed_hashes: "OrderedDict[str, float]" = OrderedDict()
+
+
+def _prune_pending():
+    cutoff = time.time() - _PENDING_TTL_SECONDS
+    for token in [t for t, v in _pending_duplicates.items() if v["at"] < cutoff]:
+        _pending_duplicates.pop(token, None)
+    while len(_pending_duplicates) > _PENDING_MAX:
+        _pending_duplicates.popitem(last=False)
+
+    for h in [h for h, at in _suppressed_hashes.items() if at < cutoff]:
+        _suppressed_hashes.pop(h, None)
+    while len(_suppressed_hashes) > _PENDING_MAX * 4:
+        _suppressed_hashes.popitem(last=False)
+
+
+def remember_duplicate(candidate: Dict[str, Any]) -> str:
+    """Elenen kaydı saklar, Telegram butonuna konacak kısa anahtarı döner."""
+    _prune_pending()
+    token = secrets.token_urlsafe(6)
+    _pending_duplicates[token] = {"at": time.time(), "candidate": candidate}
+    return token
+
+
+def take_duplicate(token: str) -> Optional[Dict[str, Any]]:
+    """Anahtarı tüketir (tek kullanımlık) — süresi dolmuşsa None."""
+    _prune_pending()
+    entry = _pending_duplicates.pop(token, None)
+    return entry["candidate"] if entry else None
+
+
+def save_remembered_duplicate(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    """'Yine de kaydet' butonunun karşılığı."""
+    from database import get_db
+
+    with get_db() as conn:
+        return service.create_expense(
+            conn,
+            amount=candidate["amount"],
+            category=candidate["category"],
+            description=candidate["description"],
+            expense_date=candidate["expense_date"],
+            source=candidate["source"],
+            source_hash=candidate["source_hash"],
+            source_at=candidate["source_at"],
+        )
+
+
 def format_tl(amount: float) -> str:
     """1234.5 → '1.234,50' (Türkçe para yazımı)"""
     formatted = f"{amount:,.2f}"
@@ -168,19 +235,35 @@ async def ingest_notification(
     if not parsed["is_expense"]:
         return {"recorded": False, "reason": parsed["reason"] or "Harcama değil", "expense": None}
 
+    source_at = posted_at or datetime.now(TZ).isoformat()
     expense_date = (posted_at or "")[:10] or datetime.now(TZ).strftime("%Y-%m-%d")
     description = parsed["merchant"] or "Banka bildirimi"
 
+    candidate = {
+        "amount": parsed["amount"],
+        "category": parsed["category"],
+        "description": description,
+        "expense_date": expense_date,
+        "source": source,
+        "source_hash": source_hash,
+        "source_at": source_at,
+    }
+
+    # Aynı alışveriş hem banka uygulamasından hem SMS'ten gelmiş olabilir
     with get_db() as conn:
-        expense = service.create_expense(
-            conn,
-            amount=parsed["amount"],
-            category=parsed["category"],
-            description=description,
-            expense_date=expense_date,
-            source=source,
-            source_hash=source_hash,
+        twin = service.find_duplicate(
+            conn, parsed["amount"], source_at, DUPLICATE_WINDOW_MINUTES
         )
+    if twin:
+        _prune_pending()
+        already_told = source_hash in _suppressed_hashes
+        _suppressed_hashes[source_hash] = time.time()
+        if not already_told:
+            await _notify_duplicate(candidate, twin)
+        return {"recorded": False, "reason": "Aynı tutarlı kayıt zaten var", "expense": twin}
+
+    with get_db() as conn:
+        expense = service.create_expense(conn, **candidate)
         alert = service.check_budget_alert(conn, expense["category"])
 
     await _notify_telegram(expense, alert)
@@ -215,6 +298,28 @@ def category_keyboard(expense_id: int) -> Dict[str, Any]:
         for i, cat in enumerate(CATEGORY_ORDER)
     ]
     return {"inline_keyboard": [buttons[i : i + 3] for i in range(0, len(buttons), 3)]}
+
+
+async def _notify_duplicate(candidate: Dict[str, Any], existing: Dict[str, Any]):
+    """Elenen çift kaydı haber verir — yanlış eleme olduysa geri alınabilsin."""
+    import html
+
+    from telegram_bot import send_message
+
+    token = remember_duplicate(candidate)
+    text = "\n".join([
+        "🔁 <b>Aynı tutarlı ikinci bildirim yok sayıldı</b>",
+        f"{format_tl(candidate['amount'])} TL · {html.escape(candidate['description'])}",
+        f"<i>Zaten kayıtlı: #{existing['id']} — {html.escape(existing['description'])}</i>",
+    ])
+    keyboard = {"inline_keyboard": [[
+        {"text": "➕ Yine de kaydet", "callback_data": f"dupadd_{token}"},
+    ]]}
+
+    try:
+        await send_message(text, reply_markup=keyboard)
+    except Exception as e:
+        print(f"⚠️  Çift kayıt bildirimi gönderilemedi: {e}")
 
 
 async def _notify_telegram(expense: Dict[str, Any], alert: Optional[str]):

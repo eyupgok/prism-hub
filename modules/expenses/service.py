@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import pytz
 
@@ -15,6 +15,7 @@ def create_expense(
     expense_date: Optional[str] = None,
     source: str = "manual",
     source_hash: Optional[str] = None,
+    source_at: Optional[str] = None,
 ) -> Dict[str, Any]:
     now = datetime.now(TZ)
     if category not in VALID_CATEGORIES:
@@ -23,11 +24,64 @@ def create_expense(
         expense_date = now.strftime("%Y-%m-%d")
 
     cursor = conn.execute(
-        """INSERT INTO expenses (amount, category, description, expense_date, created_at, source, source_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (amount, category, description, expense_date, now.isoformat(), source, source_hash),
+        """INSERT INTO expenses
+             (amount, category, description, expense_date, created_at, source, source_hash, source_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (amount, category, description, expense_date, now.isoformat(),
+         source, source_hash, source_at),
     )
     return get_expense_by_id(conn, cursor.lastrowid)
+
+
+def parse_local(iso: Optional[str]) -> Optional[datetime]:
+    """ISO metnini Europe/Istanbul saatine çevirir; saat dilimi yoksa yerel varsayar."""
+    if not iso:
+        return None
+    try:
+        parsed = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    return TZ.localize(parsed) if parsed.tzinfo is None else parsed.astimezone(TZ)
+
+
+def find_duplicate(
+    conn: sqlite3.Connection,
+    amount: float,
+    source_at: Optional[str],
+    window_minutes: int = 5,
+) -> Optional[Dict[str, Any]]:
+    """Aynı alışverişin ikinci bildirimi mi?
+
+    Aynı harcama hem bankanın uygulamasından hem SMS'ten gelebiliyor; metinleri
+    farklı olduğu için `source_hash` bunu yakalayamaz. Burada tutar + zaman
+    yakınlığına bakıyoruz.
+
+    Sadece OTOMATİK yakalanan kayıtlara bakar — kullanıcı elle iki aynı harcama
+    girdiyse ona karışmayız. Karşılaştırma `source_at` (bildirimin telefona düştüğü an)
+    üzerinden yapılır, kayıt anı üzerinden değil; telefon çevrimdışıyken biriktirip
+    sonra gönderdiğinde de doğru çalışsın diye.
+    """
+    reference = parse_local(source_at)
+    if reference is None:
+        return None
+
+    window = timedelta(minutes=window_minutes)
+    day = reference.strftime("%Y-%m-%d")
+    neighbours = conn.execute(
+        """SELECT * FROM expenses
+           WHERE source IN ('notification', 'sms')
+             AND source_at IS NOT NULL
+             AND expense_date IN (?, date(?, '-1 day'), date(?, '+1 day'))""",
+        (day, day, day),
+    ).fetchall()
+
+    for row in neighbours:
+        if abs(row["amount"] - amount) > 0.005:
+            continue
+        other = parse_local(row["source_at"])
+        if other is not None and abs(other - reference) <= window:
+            return dict(row)
+    return None
 
 
 def get_expense_by_source_hash(conn: sqlite3.Connection, source_hash: str) -> Optional[Dict[str, Any]]:

@@ -28,6 +28,11 @@ def _migrate_expenses(conn: sqlite3.Connection):
         # Ham metin saklanmaz, sadece bu özet.
         conn.execute("ALTER TABLE expenses ADD COLUMN source_hash TEXT")
 
+    if "source_at" not in existing:
+        # Bildirimin TELEFONA DÜŞTÜĞÜ an (kaydedildiği an değil). Telefon çevrimdışıyken
+        # biriktirip sonra gönderdiğinde çift kayıt kontrolü doğru çalışsın diye gerekli.
+        conn.execute("ALTER TABLE expenses ADD COLUMN source_at TEXT")
+
     conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_source_hash
         ON expenses(source_hash) WHERE source_hash IS NOT NULL

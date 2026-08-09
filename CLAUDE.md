@@ -72,9 +72,12 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
 mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
   data/SettingsStore.kt      → sunucu URL + API anahtarı + yakalama ayarları (DataStore)
   data/InstalledApps.kt      → kurulu uygulama listesi (banka olanlar başta sıralanır)
+  data/PendingQueue.kt       → çevrimdışıyken biriken bildirimler (JSON dosya, filesDir)
   data/api/                  → Retrofit client (X-API-Key interceptor), modeller
   service/ExpenseNotificationListener.kt
                              → banka bildirimlerini yakalar → /api/expenses/ingest
+  service/CaptureSyncWorker.kt
+                             → WorkManager: internet gelince kuyruğu boşaltır
   ui/screens/                → Chat, Reminders, Notes, Expenses, Settings
                                (+ ExpenseCaptureSection: izin + uygulama seçici)
   MainActivity.kt            → alt gezinme + sekme yönetimi
@@ -90,9 +93,12 @@ notes        (id, title, content, category[iş|kişisel|genel|ders|fikir], creat
 
 expenses     (id, amount, category[yemek|ulaşım|eğlence|fatura|alışveriş|diğer],
               description, expense_date, created_at,
-              source[manual|notification|sms], source_hash)
+              source[manual|notification|sms], source_hash, source_at)
               → UNIQUE INDEX idx_expenses_source_hash (source_hash) WHERE source_hash IS NOT NULL
-              → source/source_hash sonradan eklendi; models.py:_migrate_expenses() ALTER TABLE ile
+              → source_at = bildirimin TELEFONA DÜŞTÜĞÜ an (kayıt anı değil). Çevrimdışı
+                kuyruk yüzünden kayıt saatlerce sonra gelebiliyor; çift kayıt kontrolü
+                buna bakmalı, created_at'e değil.
+              → Bu sütunlar sonradan eklendi; models.py:_migrate_expenses() ALTER TABLE ile
                 mevcut veritabanlarına ekler (idempotent, her init_db()'de güvenle çalışır)
 
 budgets      (id, category UNIQUE, monthly_limit, created_at)
@@ -153,6 +159,7 @@ Callback handler (`_handle_callback_query`): inline button data formatı:
 - `expcat_{id}` → kategori seçim butonlarını göster
 - `expset_{id}_{index}` → kategoriyi değiştir (index → `ingest.CATEGORY_ORDER`;
   callback data 64 bayt sınırlı olduğu için kategori adı değil sırası gönderilir)
+- `dupadd_{token}` → çift sanılıp elenen kaydı yine de ekle (token bellekte, 1 saat ömürlü)
 
 ## Banka Bildiriminden Otomatik Harcama
 
@@ -166,8 +173,25 @@ seçtiği bankacılık uygulamalarının bildirimlerini yakalar → `POST /api/e
 - OTP/şifre metinleri iki kez elenir: telefonda (`looksLikeSecret`, hiç gönderilmez) ve
   sunucuda (Groq'a bile gitmez). İki regex birbirinin aynası — birini değiştirirsen diğerini de değiştir
 - Log'lara metin basılmaz, sadece paket adı ve sonuç
-- Tekrar koruması: `sha256(paket|metin|dakika)` — aynı bildirimin yeniden gönderimi elenir,
-  farklı dakikadaki aynı tutarlı iki alışveriş ayrı kaydedilir
+**İki katmanlı çift kayıt koruması:**
+1. `source_hash = sha256(paket|metin|dakika)` — **aynı** bildirimin yeniden gönderimi
+   (DB'de UNIQUE index)
+2. `service.find_duplicate()` — **farklı** bildirimler ama aynı alışveriş: aynı tutar +
+   `source_at` farkı ≤ `EXPENSE_DUPLICATE_WINDOW_MINUTES` (varsayılan 5) + ikisi de otomatik
+   yakalanmış. Bir alışveriş hem banka uygulamasından hem SMS'ten gelebiliyor, metinleri
+   farklı olduğu için 1. katman bunu yakalayamaz.
+
+Elle girilen (`source='manual'`) kayıtlara karışılmaz — kullanıcı bilerek aynı tutarı iki kez
+girmiş olabilir. Elenen kayıt sessizce yutulmaz: Telegram'a `[➕ Yine de kaydet]` butonlu bir
+not düşer (token bellekte, 1 saat ömürlü). Aynı bildirim tekrar gelirse ikinci not gönderilmez
+(`_suppressed_hashes`).
+
+**Çevrimdışı kuyruk (telefon tarafı):** gönderim başarısızsa bildirim `data/PendingQueue.kt`
+ile diske yazılır, `service/CaptureSyncWorker.kt` (WorkManager, `NetworkType.CONNECTED`
+koşullu, üstel geri çekilme) internet gelince gönderir. Uygulama açılışında da denenir
+(`MainActivity`). 7 günden eski kayıtlar atılır, kuyruk 300 kayıtla sınırlı. `postedAt`
+kuyrukta korunduğu için harcama doğru tarihe yazılır. Kalıcı hatalarda (400/422) kayıt atılır,
+geçici olanlarda (401/403/429/5xx) tekrar denenir.
 
 **Harcama değilse** (bakiye, iade, kampanya, şifre) endpoint 200 + `recorded: false` döner —
 telefon bunu hata saymaz, tekrar denemez.
@@ -195,6 +219,7 @@ GROQ_WHISPER_MODEL       → Ses transkripsiyon modeli (varsayılan: whisper-lar
 GROQ_VISION_MODEL        → Görsel analiz modeli (varsayılan: qwen/qwen3.6-27b)
 API_KEY                  → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal)
 PANEL_PASSWORD           → Web paneline giriş parolası (boşsa panele giriş yapılamaz)
+EXPENSE_DUPLICATE_WINDOW_MINUTES → Aynı tutarlı ikinci bildirimin çift sayılacağı aralık (varsayılan 5)
 WEBHOOK_URL              → Genel HTTPS adresi (Telegram webhook için: https://kendi-alan-adin.example.com)
 CORS_ORIGINS             → İzin verilen origin'ler, virgülle ayrılır (boşsa hepsi serbest)
 WEATHER_CITY             → Elazığ  (varsayılan)

@@ -8,6 +8,7 @@ import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.eyup.prism.data.PendingQueue
 import com.eyup.prism.data.SettingsStore
 import com.eyup.prism.data.api.ApiClient
 import com.eyup.prism.data.api.NotificationIngest
@@ -117,20 +118,27 @@ class ExpenseNotificationListener : NotificationListenerService() {
                 if (!recentKeys.add(key)) return@launch
                 trimRecentKeys()
 
-                ApiClient.configure(settings.baseUrl, settings.apiKey)
-                val result = ApiClient.api().ingestNotification(
-                    NotificationIngest(
-                        packageName = packageName,
-                        title = title,
-                        text = body,
-                        postedAt = postedAt,
-                        source = "notification",
-                    )
+                val ingest = NotificationIngest(
+                    packageName = packageName,
+                    title = title,
+                    text = body,
+                    postedAt = postedAt,
+                    source = "notification",
                 )
-                Log.i(TAG, "$packageName → kaydedildi=${result.recorded} (${result.reason})")
+
+                try {
+                    ApiClient.configure(settings.baseUrl, settings.apiKey)
+                    val result = ApiClient.api().ingestNotification(ingest)
+                    Log.i(TAG, "$packageName → kaydedildi=${result.recorded} (${result.reason})")
+                } catch (e: Exception) {
+                    // Ağ yoksa veya sunucu ulaşılamazsa kaybetme — kuyruğa al, sonra gönder.
+                    // postedAt bildirimle birlikte saklandığı için harcama doğru zamana yazılır.
+                    Log.w(TAG, "Gönderilemedi ($packageName): ${e.javaClass.simpleName} → kuyruğa alındı")
+                    PendingQueue.add(applicationContext, ingest)
+                    CaptureSyncWorker.schedule(applicationContext)
+                }
             } catch (e: Exception) {
-                // Metni loglama — sadece hata türü
-                Log.w(TAG, "Bildirim gönderilemedi ($packageName): ${e.javaClass.simpleName}")
+                Log.w(TAG, "Bildirim işlenemedi ($packageName): ${e.javaClass.simpleName}")
             }
         }
     }

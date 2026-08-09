@@ -363,6 +363,30 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
             else:
                 await answer_callback_query(cb_id, "❌ Bulunamadı")
 
+        elif data.startswith("dupadd_"):
+            from modules.expenses import service as exp_svc
+            from modules.expenses.ingest import (
+                expense_keyboard,
+                format_expense_message,
+                save_remembered_duplicate,
+                take_duplicate,
+            )
+
+            candidate = take_duplicate(data.split("_", 1)[1])
+            if candidate is None:
+                await answer_callback_query(cb_id, "⌛ Bu düğmenin süresi doldu")
+                await edit_message_reply_markup(chat_id, message_id, {"inline_keyboard": []})
+            else:
+                expense = save_remembered_duplicate(candidate)
+                with get_db() as conn:
+                    alert = exp_svc.check_budget_alert(conn, expense["category"])
+                await answer_callback_query(cb_id, "➕ Kaydedildi")
+                await edit_message(
+                    chat_id, message_id,
+                    format_expense_message(expense, alert),
+                    reply_markup=expense_keyboard(expense["id"]),
+                )
+
         elif data.startswith("expcat_"):
             from modules.expenses.ingest import category_keyboard
 

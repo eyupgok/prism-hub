@@ -21,6 +21,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,9 +33,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.eyup.prism.data.InstalledApp
+import com.eyup.prism.data.PendingQueue
 import com.eyup.prism.data.PrismSettings
 import com.eyup.prism.data.SettingsStore
 import com.eyup.prism.data.loadInstalledApps
+import com.eyup.prism.service.CaptureSyncWorker
 import com.eyup.prism.service.hasNotificationAccess
 import com.eyup.prism.service.notificationAccessIntent
 import com.eyup.prism.ui.theme.PrismGreen
@@ -63,6 +66,11 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
     var showPicker by remember { mutableStateOf(false) }
     var apps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     var search by remember { mutableStateOf("") }
+    var pending by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(settings.captureEnabled) {
+        pending = PendingQueue.size(context)
+    }
 
     // Sistem ayarlarından dönünce izin durumunu tazele
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -159,6 +167,33 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
                     onSearchChange = { search = it },
                     watched = settings.watchedPackages,
                     onToggle = { pkg, on -> scope.launch { store.setPackageWatched(pkg, on) } },
+                )
+            }
+
+            // ── Çevrimdışıyken biriken bildirimler ───────────────────────────
+            if (pending > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "📦 $pending bildirim gönderilmeyi bekliyor",
+                        color = PrismTextMuted,
+                        fontSize = 13.sp,
+                    )
+                    TextButton(onClick = {
+                        CaptureSyncWorker.scheduleNow(context.applicationContext)
+                        pending = PendingQueue.size(context)
+                    }) {
+                        Text("Şimdi gönder", color = PrismPurpleLight)
+                    }
+                }
+                Text(
+                    "İnternet gelince kendiliğinden gönderilir; harcamalar bildirimin " +
+                        "düştüğü tarihe yazılır.",
+                    color = PrismTextFaint,
+                    fontSize = 11.sp,
                 )
             }
 

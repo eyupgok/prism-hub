@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import com.eyup.prism.data.SettingsStore
 import com.eyup.prism.data.api.ApiClient
+import com.eyup.prism.service.CaptureSyncWorker
 import com.eyup.prism.ui.screens.ChatScreen
 import com.eyup.prism.ui.screens.ExpensesScreen
 import com.eyup.prism.ui.screens.NotesScreen
@@ -70,6 +71,8 @@ fun PrismApp() {
     LaunchedEffect(settings) {
         val s = settings ?: return@LaunchedEffect
         ApiClient.configure(s.baseUrl, s.apiKey)
+        // Çevrimdışıyken biriken bildirimler varsa uygulama açılınca gönderilmeye çalışılır
+        if (s.isConfigured) CaptureSyncWorker.scheduleNow(context.applicationContext)
         if (!autoRedirected) {
             autoRedirected = true
             if (!s.isConfigured) tabIndex = 4
