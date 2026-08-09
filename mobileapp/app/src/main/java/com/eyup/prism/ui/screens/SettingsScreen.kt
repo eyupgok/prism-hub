@@ -145,6 +145,8 @@ fun SettingsScreen(store: SettingsStore) {
             }
         }
 
+        saved?.let { current -> ExpenseCaptureSection(store, current) }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()

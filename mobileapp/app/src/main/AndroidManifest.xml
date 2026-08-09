@@ -4,6 +4,17 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      Ayarlar ekranındaki uygulama seçicisi için: kullanıcının gördüğü (başlatılabilir)
+      uygulamaların adlarını okur. QUERY_ALL_PACKAGES'a gerek yok.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -26,6 +37,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          Banka bildirimlerinden otomatik harcama kaydı.
+          İzin uygulama içinden istenemez; kullanıcı Ayarlar > Bildirim erişimi'nden verir.
+        -->
+        <service
+            android:name=".service.ExpenseNotificationListener"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

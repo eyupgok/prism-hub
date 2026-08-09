@@ -67,4 +67,8 @@ interface PrismApi {
 
     @DELETE("api/expenses/{id}")
     suspend fun deleteExpense(@Path("id") id: Int): MessageResponse
+
+    /** Banka bildirimini sunucuya yollar; sunucu harcamaysa kaydeder */
+    @POST("api/expenses/ingest")
+    suspend fun ingestNotification(@Body body: NotificationIngest): IngestResult
 }

@@ -61,6 +61,22 @@ data class ExpenseSummary(
     @SerializedName("by_category") val byCategory: Map<String, Double> = emptyMap(),
 )
 
+/** Banka bildiriminin sunucuya gönderilen hâli */
+data class NotificationIngest(
+    @SerializedName("package_name") val packageName: String,
+    val title: String = "",
+    val text: String,
+    @SerializedName("posted_at") val postedAt: String? = null,
+    val source: String = "notification",
+)
+
+/** Sunucunun cevabı — harcama değilse recorded=false döner, bu hata değildir */
+data class IngestResult(
+    val recorded: Boolean,
+    val reason: String = "",
+    val expense: Expense? = null,
+)
+
 data class ChatRequest(
     val message: String,
     @SerializedName("chat_id") val chatId: String = "mobile",

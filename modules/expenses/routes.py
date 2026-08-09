@@ -33,6 +33,36 @@ def list_expenses(month: Optional[str] = None, category: Optional[str] = None):
         return service.list_expenses(conn, month, category)
 
 
+class NotificationIngest(BaseModel):
+    """Telefondaki bildirim dinleyicisinin gönderdiği ham bildirim."""
+    package_name: str
+    title: str = ""
+    text: str
+    posted_at: Optional[str] = None  # ISO 8601, telefonun saatiyle
+    source: str = "notification"     # notification | sms
+
+
+@router.post("/ingest")
+async def ingest_notification(data: NotificationIngest):
+    """Banka bildirimini çözümleyip harcamaysa kaydeder.
+
+    Harcama değilse (bakiye, iade, şifre mesajı vb.) 200 döner ama kayıt açmaz —
+    telefon tarafı bunu hata saymamalı, tekrar denememeli.
+    """
+    from modules.expenses.ingest import ingest_notification as run_ingest
+
+    if data.source not in ("notification", "sms"):
+        raise HTTPException(status_code=422, detail="source 'notification' veya 'sms' olmalı")
+
+    return await run_ingest(
+        package_name=data.package_name,
+        title=data.title,
+        text=data.text,
+        posted_at=data.posted_at,
+        source=data.source,
+    )
+
+
 @router.delete("/{expense_id}")
 def delete_expense(expense_id: int):
     with get_db() as conn:

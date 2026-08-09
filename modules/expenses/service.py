@@ -13,6 +13,8 @@ def create_expense(
     category: str,
     description: str = "",
     expense_date: Optional[str] = None,
+    source: str = "manual",
+    source_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
     now = datetime.now(TZ)
     if category not in VALID_CATEGORIES:
@@ -21,10 +23,30 @@ def create_expense(
         expense_date = now.strftime("%Y-%m-%d")
 
     cursor = conn.execute(
-        "INSERT INTO expenses (amount, category, description, expense_date, created_at) VALUES (?, ?, ?, ?, ?)",
-        (amount, category, description, expense_date, now.isoformat()),
+        """INSERT INTO expenses (amount, category, description, expense_date, created_at, source, source_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (amount, category, description, expense_date, now.isoformat(), source, source_hash),
     )
     return get_expense_by_id(conn, cursor.lastrowid)
+
+
+def get_expense_by_source_hash(conn: sqlite3.Connection, source_hash: str) -> Optional[Dict[str, Any]]:
+    """Aynı bildirim daha önce işlendi mi? (tekrar kaydı önlemek için)"""
+    row = conn.execute("SELECT * FROM expenses WHERE source_hash = ?", (source_hash,)).fetchone()
+    return dict(row) if row else None
+
+
+def update_expense_category(
+    conn: sqlite3.Connection, expense_id: int, category: str
+) -> Optional[Dict[str, Any]]:
+    if category not in VALID_CATEGORIES:
+        return None
+    cursor = conn.execute(
+        "UPDATE expenses SET category = ? WHERE id = ?", (category, expense_id)
+    )
+    if cursor.rowcount == 0:
+        return None
+    return get_expense_by_id(conn, expense_id)
 
 
 def get_expense_by_id(conn: sqlite3.Connection, expense_id: int) -> Optional[Dict[str, Any]]:

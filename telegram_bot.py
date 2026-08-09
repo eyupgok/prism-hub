@@ -55,6 +55,19 @@ async def edit_message(
         await client.post(_api_url("editMessageText"), json=payload)
 
 
+async def edit_message_reply_markup(chat_id: str, message_id: int, reply_markup: Dict):
+    """Sadece butonları değiştirir, mesaj metnine dokunmaz."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        await client.post(
+            _api_url("editMessageReplyMarkup"),
+            json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": json.dumps(reply_markup),
+            },
+        )
+
+
 async def answer_callback_query(callback_query_id: str, text: str = ""):
     async with httpx.AsyncClient(timeout=10.0) as client:
         await client.post(
@@ -332,6 +345,53 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
                 await edit_message(
                     chat_id, message_id,
                     f"⏰ <b>{html.escape(r['title'])}</b> ertelendi\n📅 Yeni zaman: {svc.format_dt(due)}",
+                )
+            else:
+                await answer_callback_query(cb_id, "❌ Bulunamadı")
+
+        # ── Banka bildiriminden kaydedilen harcamayı düzeltme ────────────────
+        elif data.startswith("expdel_"):
+            from modules.expenses import service as exp_svc
+
+            expense_id = int(data.split("_")[1])
+            with get_db() as conn:
+                deleted = exp_svc.delete_expense(conn, expense_id)
+
+            if deleted:
+                await answer_callback_query(cb_id, "🗑 Silindi")
+                await edit_message(chat_id, message_id, "🗑 <i>Harcama silindi</i>")
+            else:
+                await answer_callback_query(cb_id, "❌ Bulunamadı")
+
+        elif data.startswith("expcat_"):
+            from modules.expenses.ingest import category_keyboard
+
+            expense_id = int(data.split("_")[1])
+            await answer_callback_query(cb_id, "Yeni kategoriyi seç")
+            await edit_message_reply_markup(chat_id, message_id, category_keyboard(expense_id))
+
+        elif data.startswith("expset_"):
+            from modules.expenses import service as exp_svc
+            from modules.expenses.ingest import (
+                CATEGORY_ORDER,
+                expense_keyboard,
+                format_expense_message,
+            )
+
+            _, expense_id_str, index_str = data.split("_")
+            expense_id = int(expense_id_str)
+            category = CATEGORY_ORDER[int(index_str)]
+
+            with get_db() as conn:
+                expense = exp_svc.update_expense_category(conn, expense_id, category)
+                alert = exp_svc.check_budget_alert(conn, category) if expense else None
+
+            if expense:
+                await answer_callback_query(cb_id, f"🏷 {category}")
+                await edit_message(
+                    chat_id, message_id,
+                    format_expense_message(expense, alert),
+                    reply_markup=expense_keyboard(expense_id),
                 )
             else:
                 await answer_callback_query(cb_id, "❌ Bulunamadı")

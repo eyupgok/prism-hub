@@ -48,7 +48,9 @@ modules/
   expenses/
     models.py   → CREATE TABLE expenses + budgets (id, category, monthly_limit, created_at)
     service.py  → CRUD + aylık özet + bütçe limiti + uyarı sistemi
-    routes.py   → router (/api/expenses/*) + budget_router (/api/budget/*)
+    ingest.py   → Banka bildirimi → Groq → harcama kaydı + Telegram bildirimi
+                   (ham metin DB'ye yazılmaz, sadece SHA-256 özeti; OTP metinleri elenir)
+    routes.py   → router (/api/expenses/*, POST /ingest dahil) + budget_router (/api/budget/*)
   weather/
     service.py  → Open-Meteo API, WMO kod → Türkçe, format fonksiyonu
     routes.py
@@ -61,9 +63,13 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
   src/pages/         → Dashboard, Reminders, Notes, Expenses, Settings
 
 mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
-  data/SettingsStore.kt      → sunucu URL + API anahtarı (DataStore)
+  data/SettingsStore.kt      → sunucu URL + API anahtarı + yakalama ayarları (DataStore)
+  data/InstalledApps.kt      → kurulu uygulama listesi (banka olanlar başta sıralanır)
   data/api/                  → Retrofit client (X-API-Key interceptor), modeller
+  service/ExpenseNotificationListener.kt
+                             → banka bildirimlerini yakalar → /api/expenses/ingest
   ui/screens/                → Chat, Reminders, Notes, Expenses, Settings
+                               (+ ExpenseCaptureSection: izin + uygulama seçici)
   MainActivity.kt            → alt gezinme + sekme yönetimi
 ```
 
@@ -76,7 +82,11 @@ reminders    (id, title, due_datetime, priority[1-3], is_completed, last_notifie
 notes        (id, title, content, category[iş|kişisel|genel|ders|fikir], created_at)
 
 expenses     (id, amount, category[yemek|ulaşım|eğlence|fatura|alışveriş|diğer],
-              description, expense_date, created_at)
+              description, expense_date, created_at,
+              source[manual|notification|sms], source_hash)
+              → UNIQUE INDEX idx_expenses_source_hash (source_hash) WHERE source_hash IS NOT NULL
+              → source/source_hash sonradan eklendi; models.py:_migrate_expenses() ALTER TABLE ile
+                mevcut veritabanlarına ekler (idempotent, her init_db()'de güvenle çalışır)
 
 budgets      (id, category UNIQUE, monthly_limit, created_at)
 
@@ -132,6 +142,28 @@ Kullanıcı içeriği Telegram HTML parse_mode'a `html.escape()` ile gider (ai_r
 Callback handler (`_handle_callback_query`): inline button data formatı:
 - `complete_{id}` → hatırlatıcıyı tamamla
 - `snooze_{minutes}_{id}` → ertele (15 dk veya 60 dk)
+- `expdel_{id}` → bildirimden kaydedilen harcamayı sil
+- `expcat_{id}` → kategori seçim butonlarını göster
+- `expset_{id}_{index}` → kategoriyi değiştir (index → `ingest.CATEGORY_ORDER`;
+  callback data 64 bayt sınırlı olduğu için kategori adı değil sırası gönderilir)
+
+## Banka Bildiriminden Otomatik Harcama
+
+Telefondaki `ExpenseNotificationListener` (Android `NotificationListenerService`) kullanıcının
+seçtiği bankacılık uygulamalarının bildirimlerini yakalar → `POST /api/expenses/ingest` →
+`modules/expenses/ingest.py` metni Groq'a okutur → harcamaysa kaydeder → Telegram'dan
+`[🏷 Kategori] [🗑 Sil]` butonlarıyla haber verir.
+
+**Gizlilik kararları (bilinçli, değiştirirken dikkat):**
+- Ham bildirim metni **hiçbir yerde saklanmaz** — DB'ye sadece SHA-256 özeti yazılır
+- OTP/şifre metinleri iki kez elenir: telefonda (`looksLikeSecret`, hiç gönderilmez) ve
+  sunucuda (Groq'a bile gitmez). İki regex birbirinin aynası — birini değiştirirsen diğerini de değiştir
+- Log'lara metin basılmaz, sadece paket adı ve sonuç
+- Tekrar koruması: `sha256(paket|metin|dakika)` — aynı bildirimin yeniden gönderimi elenir,
+  farklı dakikadaki aynı tutarlı iki alışveriş ayrı kaydedilir
+
+**Harcama değilse** (bakiye, iade, kampanya, şifre) endpoint 200 + `recorded: false` döner —
+telefon bunu hata saymaz, tekrar denemez.
 
 ## Zamanlayıcı (scheduler.py)
 
