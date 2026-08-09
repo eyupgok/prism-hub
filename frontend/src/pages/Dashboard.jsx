@@ -153,7 +153,7 @@ export default function Dashboard({ onNavigate }) {
       {error && (
         <div className="p-4 rounded-xl border text-sm text-red-400"
           style={{ background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.25)' }}>
-          ⚠️ API bağlantı hatası: {error}. VITE_API_URL ayarını kontrol et.
+          ⚠️ API bağlantı hatası: {error}
         </div>
       )}
 

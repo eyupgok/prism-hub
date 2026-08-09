@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import BottomNav from './components/BottomNav'
 import Dashboard from './pages/Dashboard'
@@ -6,6 +6,8 @@ import Reminders from './pages/Reminders'
 import Notes from './pages/Notes'
 import Expenses from './pages/Expenses'
 import Settings from './pages/Settings'
+import Login from './pages/Login'
+import { api, UNAUTHORIZED_EVENT } from './api/client'
 
 const PAGES = {
   dashboard: Dashboard,
@@ -17,6 +19,41 @@ const PAGES = {
 
 export default function App() {
   const [page, setPage] = useState('dashboard')
+  // null = oturum durumu henüz bilinmiyor (ilk kontrol sürüyor)
+  const [auth, setAuth] = useState(null)
+
+  const checkAuth = useCallback(async () => {
+    try {
+      setAuth(await api.me())
+    } catch {
+      // Sunucuya ulaşılamıyorsa giriş ekranını göster — orada anlaşılır bir hata verilir
+      setAuth({ authenticated: false, login_required: true, login_enabled: true })
+    }
+  }, [])
+
+  useEffect(() => {
+    checkAuth()
+  }, [checkAuth])
+
+  // Oturum ortada düşerse (çerez süresi dolduysa) giriş ekranına dön
+  useEffect(() => {
+    const onUnauthorized = () => setAuth((a) => ({ ...a, authenticated: false }))
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  }, [])
+
+  if (auth === null) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-purple-600 border-t-transparent animate-spin" />
+      </div>
+    )
+  }
+
+  if (auth.login_required && !auth.authenticated) {
+    return <Login onSuccess={checkAuth} />
+  }
+
   const Page = PAGES[page] || Dashboard
 
   return (

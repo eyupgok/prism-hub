@@ -20,7 +20,11 @@ Oracle Cloud Always Free VM'de kendi kendine barındırılan, SQLite tabanlı, m
 
 ```
 main.py              → FastAPI app, lifespan, tüm router'lar, CORS (CORS_ORIGINS env)
-auth.py              → X-API-Key doğrulama (tüm /api/* rotaları korur; API_KEY boşsa devre dışı)
+auth.py              → İki yollu doğrulama: X-API-Key başlığı (Android) VEYA prism_session
+                       çerezi (web paneli). Oturum bileti HMAC imzalı + son kullanma tarihli,
+                       sunucuda saklanmaz. İmza anahtarı API_KEY'den türetilir — API_KEY
+                       değişirse tüm oturumlar düşer. Parola denemesi 8'de bir 15 dk kilitlenir.
+                       API_KEY boşsa doğrulama tamamen devre dışı (lokal geliştirme).
 database.py          → SQLite bağlantı, get_db() context manager, konuşma geçmişi + temizlik
 ai_router.py         → Groq NLP parsing, JSON dispatch, route_message(), _esc() HTML escape
 telegram_bot.py      → /webhook (secret token doğrulama + BackgroundTasks), hızlı komutlar,
@@ -31,6 +35,9 @@ Procfile
 .env.example
 
 modules/
+  auth/
+    routes.py   → /api/auth/me, /login, /logout — KORUMASIZ eklenir (main.py),
+                   giriş yapabilmek için giriş yapmış olmak gerekemez
   chat/
     service.py  → Groq Whisper transkripsiyon + describe_image() vision analizi
                    (Telegram + REST ortak kullanır)
@@ -187,6 +194,7 @@ GROQ_MODEL               → Metin/komut modeli (varsayılan: llama-3.3-70b-vers
 GROQ_WHISPER_MODEL       → Ses transkripsiyon modeli (varsayılan: whisper-large-v3)
 GROQ_VISION_MODEL        → Görsel analiz modeli (varsayılan: qwen/qwen3.6-27b)
 API_KEY                  → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal)
+PANEL_PASSWORD           → Web paneline giriş parolası (boşsa panele giriş yapılamaz)
 WEBHOOK_URL              → Genel HTTPS adresi (Telegram webhook için: https://kendi-alan-adin.example.com)
 CORS_ORIGINS             → İzin verilen origin'ler, virgülle ayrılır (boşsa hepsi serbest)
 WEATHER_CITY             → Elazığ  (varsayılan)
@@ -246,18 +254,17 @@ Caddy tek site bloğunda yolları ayırır:
 | Yol | Koruma | Nereye |
 |---|---|---|
 | `/webhook*` | Telegram imzası | backend |
-| `/api/*` | `X-API-Key` (Android) | backend |
+| `/api/auth/*` | yok (giriş uçları) | backend |
+| `/api/*` | `X-API-Key` **veya** `prism_session` çerezi | backend |
 | `/health` | yok | backend |
-| `/panel-api/*` | Basic Auth + Caddy `X-API-Key` ekler | backend (ön ek soyulur) |
-| diğer her şey | Basic Auth | `/var/www/prism-panel/dist` statik dosyalar |
+| diğer her şey | yok — panel kabuğu sır içermez | `/var/www/prism-panel/dist` statik dosyalar |
 
-Panel API anahtarını **taşımaz** — `frontend/.env`'de `VITE_API_URL=/panel-api`, `VITE_API_KEY` boş.
-Anahtarı Caddy `header_up` ile ekler, böylece JS paketine hiç girmez.
+Panel gizli anahtar **taşımaz**: `frontend/.env`'de `VITE_API_URL` boş (istekler göreli yoldan
+aynı sunucuya gider), `VITE_API_KEY` diye bir değişken yok. Kullanıcı `PANEL_PASSWORD` ile giriş
+yapar, HttpOnly çerez alır. Derleme sonrası `dist/` içinde `X-API-Key` geçmemeli — kontrol et.
 
 Panel güncelleme: PC'de `npm run build` → `scp -r frontend\dist ...:/var/www/prism-panel/` →
 sunucuda **`chmod -R a+rX /var/www/prism-panel`** (scp Windows'tan kısıtlı izinle geldiği için şart).
-
-Basic Auth geçicidir; panele giriş ekranı eklenince `basic_auth` blokları ve `/panel-api` bloğu silinir.
 
 Uygulama açılışta `set_webhook()` çağırır, Telegram webhook otomatik ayarlanır.
 Lokal test için `WEBHOOK_URL` boş bırakılabilir — webhook kurulmaz, bot Telegram'dan mesaj almaz ama API endpoint'leri çalışır.

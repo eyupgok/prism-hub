@@ -11,6 +11,7 @@ from auth import verify_api_key
 from database import init_db
 from scheduler import start_scheduler, stop_scheduler
 from telegram_bot import router as telegram_router, set_webhook
+from modules.auth.routes import router as auth_router
 from modules.chat.routes import router as chat_router
 from modules.reminders.routes import router as reminders_router
 from modules.notes.routes import router as notes_router
@@ -26,6 +27,8 @@ async def lifespan(app: FastAPI):
 
     if not os.getenv("API_KEY", ""):
         print("⚠️  API_KEY ayarlanmamış — REST API doğrulaması DEVRE DIŞI (sadece lokal geliştirme için uygundur)")
+    elif not os.getenv("PANEL_PASSWORD", ""):
+        print("⚠️  PANEL_PASSWORD ayarlanmamış — web paneline giriş yapılamaz (API_KEY ile REST erişimi çalışmaya devam eder)")
 
     webhook_url = os.getenv("WEBHOOK_URL", "").rstrip("/")
     if webhook_url:
@@ -57,10 +60,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# /webhook API key gerektirmez (Telegram çağırır); tüm /api/* rotaları korunur
+# /webhook API key gerektirmez (Telegram çağırır); tüm /api/* rotaları korunur.
+# /api/auth/* de korumasızdır — giriş yapabilmek için giriş yapmış olmak gerekemez.
 protected = [Depends(verify_api_key)]
 
 app.include_router(telegram_router)
+app.include_router(auth_router)
 app.include_router(chat_router, dependencies=protected)
 app.include_router(reminders_router, dependencies=protected)
 app.include_router(notes_router, dependencies=protected)

@@ -1,15 +1,36 @@
+// Panel backend ile aynı adreste yayınlandığı için yol göreli: /api/...
+// Kimlik doğrulama HttpOnly çerezle yapılır — JS paketinde gizli anahtar YOKTUR.
 const BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-const API_KEY = import.meta.env.VITE_API_KEY || ''
+
+/** Oturum düştüğünde App'in giriş ekranına dönmesi için yayınlanan olay */
+export const UNAUTHORIZED_EVENT = 'prism:unauthorized'
+
+export class AuthError extends Error {
+  constructor(message = 'Oturum sona erdi, tekrar giriş yap') {
+    super(message)
+    this.name = 'AuthError'
+  }
+}
 
 async function request(path, options = {}) {
   const res = await fetch(`${BASE_URL}${path}`, {
+    credentials: 'same-origin', // oturum çerezi gitsin
     headers: {
       'Content-Type': 'application/json',
-      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
       ...options.headers,
     },
     ...options,
   })
+
+  if (res.status === 401) {
+    // Giriş uçlarında 401 "parola yanlış" demek — orada giriş ekranına atmaya gerek yok
+    if (!path.startsWith('/api/auth/')) {
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
+    }
+    const err = await res.json().catch(() => ({}))
+    throw new AuthError(err.detail || undefined)
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || `HTTP ${res.status}`)
@@ -18,6 +39,12 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // ── Oturum ──────────────────────────────────────────────────────────────
+  me: () => request('/api/auth/me'),
+  login: (password) =>
+    request('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
+  logout: () => request('/api/auth/logout', { method: 'POST' }),
+
   getReminders: (includeCompleted = false) =>
     request(`/api/reminders/?include_completed=${includeCompleted}`),
   createReminder: (data) =>

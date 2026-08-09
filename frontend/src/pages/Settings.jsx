@@ -1,4 +1,6 @@
-import { Settings as SettingsIcon, Server, Shield, Zap, Info } from 'lucide-react'
+import { useState } from 'react'
+import { Settings as SettingsIcon, Server, Shield, Zap, Info, LogOut } from 'lucide-react'
+import { api } from '../api/client'
 
 const STACK = [
   { label: 'Frontend', value: 'React 18 + Vite + Tailwind CSS' },
@@ -13,6 +15,17 @@ const STACK = [
 
 export default function Settings() {
   const apiUrl = import.meta.env.VITE_API_URL || '(aynı adres — istekler panelin sunucusuna gidiyor)'
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  async function logout() {
+    setLoggingOut(true)
+    try {
+      await api.logout()
+    } finally {
+      // Çerez silindi; sayfayı yenilemek en temiz sıfırlama
+      window.location.reload()
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -73,9 +86,13 @@ export default function Settings() {
           sahibine yanıt verir.
         </p>
         <p className="text-slate-400 text-sm leading-relaxed">
-          Panel, önünde kullanıcı adı/parola isteyen Caddy ile yayınlanır. API anahtarı tarayıcıya
-          hiç gönderilmez — istekleri backend'e iletirken anahtarı Caddy ekler.
+          Panele parolayla giriş yapılır. Oturum bileti <strong className="text-slate-200">HttpOnly</strong>{' '}
+          çerezde tutulur — JavaScript okuyamaz ve JS paketinde gizli anahtar bulunmaz.
         </p>
+        <button onClick={logout} disabled={loggingOut} className="btn-secondary w-full mt-1">
+          <LogOut size={15} />
+          {loggingOut ? 'Çıkılıyor...' : 'Oturumu kapat'}
+        </button>
       </div>
 
       {/* About */}
