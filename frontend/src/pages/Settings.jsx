@@ -9,7 +9,8 @@ const STACK = [
   { label: 'Backend', value: 'Python 3.11 + FastAPI' },
   { label: 'Veritabanı', value: 'SQLite (WAL mode)' },
   { label: 'AI / NLP', value: 'Groq — llama-3.3-70b-versatile' },
-  { label: 'Ses', value: 'Groq Whisper — whisper-large-v3-turbo' },
+  { label: 'Ses', value: 'Groq Whisper — whisper-large-v3' },
+  { label: 'Görsel', value: 'Groq — qwen/qwen3.6-27b' },
   { label: 'Deploy', value: 'Oracle Cloud VM (systemd + Caddy)' },
 ]
 

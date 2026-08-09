@@ -66,6 +66,11 @@ modules/
     routes.py
 
 frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin kökünde yayında)
+  src/index.css      → TASARIM SİSTEMİ. Renkler `:root` altında CSS değişkeni; tema
+                       değiştirmek için sadece burayı düzenle, bileşenlere dokunma.
+                       Animasyonlar (fadeUp/fadeIn/scaleIn/pulseGlow/float), .glass,
+                       .nav-item, .btn-primary, .input-field hep burada tanımlı.
+                       Ortak yumuşatma eğrisi: var(--ease) = cubic-bezier(.16,1,.3,1)
   src/api/client.js  → fetch sarmalayıcı, X-API-Key header (VITE_API_KEY)
   src/pages/         → Dashboard, Reminders, Notes, Expenses, Settings
 
@@ -290,6 +295,12 @@ yapar, HttpOnly çerez alır. Derleme sonrası `dist/` içinde `X-API-Key` geçm
 
 Panel güncelleme: PC'de `npm run build` → `scp -r frontend\dist ...:/var/www/prism-panel/` →
 sunucuda **`chmod -R a+rX /var/www/prism-panel`** (scp Windows'tan kısıtlı izinle geldiği için şart).
+
+Lokal geliştirme: `npm run dev` — `vite.config.js` içindeki proxy `/api` ve `/health`
+isteklerini `127.0.0.1:8000`'e yönlendirir, böylece `VITE_API_URL` boşken de çalışır.
+
+⚠️ **Tailwind dinamik sınıf adlarını göremez.** `` className={`stagger-${i}`} `` yazarsan
+o kurallar derlemede silinir; sabit liste kullan (`STAGGER[i]` — Sidebar/Dashboard'da örneği var).
 
 Uygulama açılışta `set_webhook()` çağırır, Telegram webhook otomatik ayarlanır.
 Lokal test için `WEBHOOK_URL` boş bırakılabilir — webhook kurulmaz, bot Telegram'dan mesaj almaz ama API endpoint'leri çalışır.

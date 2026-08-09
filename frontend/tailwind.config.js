@@ -8,6 +8,9 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
+        // Başlıklar için geometrik sans — index.css'te h1/h2/h3'e otomatik uygulanır,
+        // başka yerde istersen font-display sınıfıyla çağır
+        display: ['Space Grotesk', 'Inter', 'system-ui', 'sans-serif'],
       },
     },
   },
