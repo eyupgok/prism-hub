@@ -6,6 +6,38 @@ import pytz
 TZ = pytz.timezone("Europe/Istanbul")
 VALID_CATEGORIES = {"yemek", "ulaşım", "eğlence", "fatura", "alışveriş", "diğer"}
 
+# Negatif tutar = İADE. Bilinçli bir tasarım: ayrı bir tablo tutmak yerine eksi
+# yazıyoruz, böylece aylık toplam ve bütçe uyarısı (ikisi de SUM(amount)) hiçbir
+# ek koda gerek olmadan doğru sonuç veriyor.
+#
+# Sıfır anlamsız olduğu için reddedilir. Üst sınır ise okuma hatalarına karşı:
+# fişteki "1.234,56" yanlışlıkla 123456 olarak okunursa fark edilsin.
+MAX_ABS_AMOUNT = 1_000_000.0
+
+
+class InvalidAmount(ValueError):
+    """Tutar kabul edilebilir aralığın dışında"""
+
+
+def validate_amount(amount: Any) -> float:
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        raise InvalidAmount("Tutar sayı olmalı")
+    if value != value or value in (float("inf"), float("-inf")):
+        raise InvalidAmount("Tutar geçersiz")
+    if value == 0:
+        raise InvalidAmount("Tutar sıfır olamaz")
+    if abs(value) > MAX_ABS_AMOUNT:
+        raise InvalidAmount(
+            f"Tutar fazla büyük görünüyor ({value:,.2f}). Yanlış okunmuş olabilir."
+        )
+    return round(value, 2)
+
+
+def is_refund(amount: float) -> bool:
+    return amount < 0
+
 
 def create_expense(
     conn: sqlite3.Connection,
@@ -18,6 +50,7 @@ def create_expense(
     source_at: Optional[str] = None,
 ) -> Dict[str, Any]:
     now = datetime.now(TZ)
+    amount = validate_amount(amount)
     if category not in VALID_CATEGORIES:
         category = "diğer"
     if not expense_date:
@@ -209,8 +242,11 @@ def check_budget_alert(conn: sqlite3.Connection, category: str, month: str = Non
         "SELECT SUM(amount) as total FROM expenses WHERE expense_date LIKE ? AND category = ?",
         (f"{month}%", category),
     ).fetchone()
+    # İadeler eksi yazıldığı için toplamdan kendiliğinden düşüyor
     current = row["total"] or 0
     limit = budget["monthly_limit"]
+    if current <= 0:
+        return None
     pct = (current / limit) * 100
     if pct >= 100:
         return f"🚨 {category} bütçesi aşıldı! {current:.0f}/{limit:.0f} TL (%{pct:.0f})"

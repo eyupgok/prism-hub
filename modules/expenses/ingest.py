@@ -50,9 +50,13 @@ Sen bir banka bildirimi çözümleyicisisin. Verilen bildirim metnini incele ve 
 HARCAMA sayılan durumlar: kart veya hesaptan yapılan ödeme, alışveriş, nakit çekme,
 fatura ödemesi, otomatik ödeme talimatı, giden para transferi.
 
-HARCAMA SAYILMAYAN durumlar: bakiye bildirimi, hesaba para yatması, gelen havale/EFT,
-iade/iptal, kampanya ve reklam mesajları, giriş bildirimi, limit/puan bilgisi,
-ekstre veya son ödeme hatırlatması, tek kullanımlık şifre.
+İADE de kaydedilir ama tutarı NEGATİF yazılır: alışveriş iadesi, işlem iptali,
+"iade edildi", "iptal edildi", "geri ödendi" gibi ifadeler. Örnek: 273,90 TL iade
+edildiyse amount: -273.90 olur. Kategori, iadenin ait olduğu alışverişin kategorisidir.
+
+HARCAMA SAYILMAYAN durumlar: bakiye bildirimi, maaş/gelen havale/EFT, kampanya ve
+reklam mesajları, giriş bildirimi, limit/puan bilgisi, ekstre veya son ödeme
+hatırlatması, tek kullanımlık şifre.
 
 Şu JSON şemasıyla yanıt ver:
 {"is_expense": true/false, "amount": sayı veya null, "merchant": "metin",
@@ -60,6 +64,7 @@ ekstre veya son ödeme hatırlatması, tek kullanımlık şifre.
 
 Kurallar:
 - amount: sadece sayı yaz, para birimi ekleme. Türkçe yazım (1.234,56) doğru çevrilmeli: 1234.56
+- İade ise amount NEGATİF olmalı (-1234.56), harcama ise pozitif
 - merchant: işyeri/kurum adı. Bulamazsan boş string
 - category: işyerine göre seç. Market/giyim/teknoloji → alışveriş. Restoran/kafe/yemek siparişi → yemek.
   Akaryakıt/taksi/otobüs/metro/otopark → ulaşım. Sinema/oyun/abonelik/konser → eğlence.
@@ -125,7 +130,8 @@ async def parse_notification(title: str, text: str) -> Dict[str, Any]:
         category = "diğer"
 
     return {
-        "is_expense": bool(parsed.get("is_expense")) and amount is not None and amount > 0,
+        # Negatif tutar iade demek — sıfır dışındaki her değer geçerli
+        "is_expense": bool(parsed.get("is_expense")) and amount is not None and amount != 0,
         "amount": amount,
         "merchant": (parsed.get("merchant") or "").strip()[:100],
         "category": category,
@@ -262,9 +268,13 @@ async def ingest_notification(
             await _notify_duplicate(candidate, twin)
         return {"recorded": False, "reason": "Aynı tutarlı kayıt zaten var", "expense": twin}
 
-    with get_db() as conn:
-        expense = service.create_expense(conn, **candidate)
-        alert = service.check_budget_alert(conn, expense["category"])
+    try:
+        with get_db() as conn:
+            expense = service.create_expense(conn, **candidate)
+            alert = service.check_budget_alert(conn, expense["category"])
+    except service.InvalidAmount as e:
+        print(f"⚠️  Bildirimden gelen tutar reddedildi ({package_name}): {e}")
+        return {"recorded": False, "reason": f"Tutar geçersiz: {e}", "expense": None}
 
     await _notify_telegram(expense, alert)
     return {"recorded": True, "reason": "Kaydedildi", "expense": expense}
@@ -274,8 +284,14 @@ def format_expense_message(expense: Dict[str, Any], alert: Optional[str] = None)
     """Telegram bildirim metni. Kategori değiştirilince aynı fonksiyonla yeniden kurulur."""
     import html
 
+    refund = expense["amount"] < 0
+    icon = "↩️" if refund else "💳"
+    # İadede eksi işaretini ayrıca göstermeye gerek yok, ikon ve etiket zaten anlatıyor
+    amount_text = format_tl(abs(expense["amount"])) if refund else format_tl(expense["amount"])
+    label = " · <b>İADE</b>" if refund else ""
+
     lines = [
-        f"💳 <b>{format_tl(expense['amount'])} TL</b> · {expense['category']}",
+        f"{icon} <b>{amount_text} TL</b> · {expense['category']}{label}",
         f"🏪 {html.escape(expense['description'])}",
         "<i>Banka bildiriminden otomatik kaydedildi</i>",
     ]

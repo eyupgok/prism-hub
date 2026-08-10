@@ -59,6 +59,7 @@ import com.eyup.prism.ui.components.EmptyState
 import com.eyup.prism.ui.components.ErrorBanner
 import com.eyup.prism.ui.components.ScreenHeader
 import com.eyup.prism.ui.theme.CategoryColors
+import com.eyup.prism.ui.theme.PrismGreen
 import com.eyup.prism.ui.theme.PrismPurple
 import com.eyup.prism.ui.theme.PrismSurface2
 import com.eyup.prism.ui.theme.PrismText
@@ -271,9 +272,12 @@ private fun ExpenseRow(expense: Expense, onDelete: () -> Unit) {
             )
             Text(expense.expenseDate, color = PrismTextFaint, fontSize = 12.sp)
         }
+        // Negatif tutar iade demek — yeşil ve artı işaretiyle gösterilir,
+        // böylece listede harcamadan ayırt edilir (panelde de aynı gösterim var)
+        val refund = expense.amount < 0
         Text(
-            formatAmount(expense.amount),
-            color = PrismText,
+            if (refund) "+ ${formatAmount(-expense.amount)}" else formatAmount(expense.amount),
+            color = if (refund) PrismGreen else PrismText,
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold,
         )
@@ -328,7 +332,8 @@ private fun CreateExpenseDialog(onDismiss: () -> Unit, onCreate: (ExpenseCreate)
                     val value = amount.toDoubleOrNull() ?: return@Button
                     onCreate(ExpenseCreate(value, category, description.trim()))
                 },
-                enabled = (amount.toDoubleOrNull() ?: 0.0) > 0.0,
+                // Negatif tutar geçerlidir (iade); sadece sıfır ve boş engellenir
+                enabled = (amount.toDoubleOrNull() ?: 0.0) != 0.0,
                 colors = ButtonDefaults.buttonColors(containerColor = PrismPurple),
             ) { Text("Ekle") }
         },

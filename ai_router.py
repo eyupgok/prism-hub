@@ -100,6 +100,11 @@ Tekrarlama belirleme:
 Şu ifadeler harcama anlamına gelir:
 "harcadım", "ödedim", "aldım", "TL", "lira", "para"
 
+İade / iptal / geri ödeme:
+- "200 TL iade aldım", "aldığım ayakkabıyı iade ettim, 450 TL geri geldi" → expenses.create
+  ama amount NEGATİF olsun (-200, -450). Kategori iadenin ait olduğu alışverişinkidir.
+- İade tutarı aylık toplamdan kendiliğinden düşer, ayrıca bir şey yapma.
+
 Geçmiş tarihli harcama:
 - "dün 200 TL harcadım" → expense_date: dünün tarihi (YYYY-MM-DD)
 - "geçen cuma", "3 gün önce" vb. → ilgili günün tarihi
@@ -404,18 +409,22 @@ async def _handle_expenses(action: str, params: Dict) -> str:
                 if warning:
                     return warning
 
-            e = svc.create_expense(
-                conn,
-                params["amount"],
-                params.get("category", "diğer"),
-                params.get("description", ""),
-                params.get("expense_date"),
-                source="receipt" if params.get("from_receipt") else "manual",
-                source_at=_receipt_moment(params) if params.get("from_receipt") else None,
-            )
+            try:
+                e = svc.create_expense(
+                    conn,
+                    params["amount"],
+                    params.get("category", "diğer"),
+                    params.get("description", ""),
+                    params.get("expense_date"),
+                    source="receipt" if params.get("from_receipt") else "manual",
+                    source_at=_receipt_moment(params) if params.get("from_receipt") else None,
+                )
+            except svc.InvalidAmount as err:
+                return f"⚠️ Tutar kaydedilemedi: {err}"
+            refund = e["amount"] < 0
             msg = (
-                f"💰 Harcama kaydedildi!\n"
-                f"💵 {e['amount']:.2f} TL — {e['category']}\n"
+                f"{'↩️ İade kaydedildi!' if refund else '💰 Harcama kaydedildi!'}\n"
+                f"💵 {abs(e['amount']):.2f} TL — {e['category']}\n"
                 f"📅 {e['expense_date']}\n"
                 f"📝 {_esc(e['description']) or '—'}"
             )

@@ -13,6 +13,12 @@ async def check_reminders():
     from telegram_bot import send_reminder_notification
 
     with get_db() as conn:
+        # Sunucu bir saatten uzun kapalı kaldıysa bildirilemeyen tekrarlayanlar
+        # geçmişte takılı kalıyor — önce onları bir sonraki periyoda taşı.
+        moved = svc.reschedule_overdue_recurring(conn)
+        if moved:
+            print(f"🔁 {moved} gecikmiş tekrarlayan hatırlatıcı sonraki periyoda taşındı")
+
         to_notify = svc.get_reminders_to_notify(conn)
 
     for reminder in to_notify:
@@ -39,6 +45,20 @@ async def cleanup_conversations():
             print(f"🧹 {deleted} eski konuşma kaydı silindi")
     except Exception as e:
         print(f"❌ Konuşma temizliği başarısız: {e}")
+
+
+async def nightly_backup():
+    """Her gece 04:00'te veritabanı yedeğini Telegram'a gönderir.
+
+    03:00'teki konuşma temizliğinden sonra çalışır ki yedek zaten sadeleşmiş
+    veriyi içersin.
+    """
+    from backup import send_backup
+
+    try:
+        await send_backup()
+    except Exception as e:
+        print(f"❌ Yedekleme işi çöktü: {type(e).__name__}: {e}")
 
 
 async def send_morning_summary():
@@ -80,8 +100,19 @@ def start_scheduler():
         max_instances=1,
     )
 
+    scheduler.add_job(
+        nightly_backup,
+        CronTrigger(hour=4, minute=0, timezone=TZ),
+        id="nightly_backup",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     scheduler.start()
-    print("✅ Zamanlayıcı başlatıldı (hatırlatıcı kontrolü: 1 dk, sabah özeti: 08:00, temizlik: 03:00)")
+    print(
+        "✅ Zamanlayıcı başlatıldı "
+        "(hatırlatıcı: 1 dk, sabah özeti: 08:00, temizlik: 03:00, yedek: 04:00)"
+    )
 
 
 def stop_scheduler():

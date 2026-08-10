@@ -11,10 +11,14 @@ _TZ = pytz.timezone("Europe/Istanbul")
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # timeout: zamanlayıcı her dakika yazıyor; buna panelden gelen istek veya bir
+    # banka bildirimi denk gelirse SQLite varsayılan olarak HİÇ beklemeden
+    # "database is locked" atıyor. 5 saniye beklemek bu çakışmaları görünmez kılar.
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 

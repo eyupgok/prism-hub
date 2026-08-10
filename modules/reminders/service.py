@@ -12,6 +12,22 @@ PRIORITY_EMOJIS = {1: "🔴", 2: "🟡", 3: "🟢"}
 RECURRENCE_LABELS = {"daily": "Her gün", "weekly": "Her hafta", "monthly": "Her ay"}
 
 
+VALID_RECURRENCES = {"none", "daily", "weekly", "monthly"}
+
+
+def normalize_priority(priority: Any) -> int:
+    """1-3 aralığına sıkıştırır. Aralık dışı değer bildirim sıklığı hesabını
+    sessizce 'normal'e düşürüyordu; artık en yakın geçerli değere çekiliyor."""
+    try:
+        return max(1, min(int(priority), 3))
+    except (TypeError, ValueError):
+        return 3
+
+
+def normalize_recurrence(recurrence: Any) -> str:
+    return recurrence if recurrence in VALID_RECURRENCES else "none"
+
+
 def now_local() -> datetime:
     return datetime.now(TZ)
 
@@ -76,7 +92,8 @@ def create_reminder(
     dt = parse_dt(due_datetime)
     cursor = conn.execute(
         "INSERT INTO reminders (title, due_datetime, priority, recurrence, created_at) VALUES (?, ?, ?, ?, ?)",
-        (title, dt.isoformat(), priority, recurrence, now_local().isoformat()),
+        (title, dt.isoformat(), normalize_priority(priority), normalize_recurrence(recurrence),
+         now_local().isoformat()),
     )
     return get_reminder_by_id(conn, cursor.lastrowid)
 
@@ -133,10 +150,10 @@ def update_reminder(
         values.append(None)
     if priority is not None:
         fields.append("priority = ?")
-        values.append(priority)
+        values.append(normalize_priority(priority))
     if recurrence is not None:
         fields.append("recurrence = ?")
-        values.append(recurrence if recurrence in ("none", "daily", "weekly", "monthly") else "none")
+        values.append(normalize_recurrence(recurrence))
     if not fields:
         return get_reminder_by_id(conn, reminder_id)
     values.append(reminder_id)
@@ -144,10 +161,17 @@ def update_reminder(
     return get_reminder_by_id(conn, reminder_id)
 
 
+# Erteleme 1 dakika ile 1 hafta arasında olmalı. Negatif değer hatırlatıcıyı
+# geçmişe taşıyıp bildirim penceresinden düşürüyordu — yani sessizce öldürüyordu.
+MIN_SNOOZE_MINUTES = 1
+MAX_SNOOZE_MINUTES = 7 * 24 * 60
+
+
 def snooze_reminder(conn: sqlite3.Connection, reminder_id: int, minutes: int) -> Optional[Dict[str, Any]]:
     reminder = get_reminder_by_id(conn, reminder_id)
     if not reminder:
         return None
+    minutes = max(MIN_SNOOZE_MINUTES, min(int(minutes), MAX_SNOOZE_MINUTES))
     new_due = now_local() + timedelta(minutes=minutes)
     conn.execute(
         "UPDATE reminders SET due_datetime = ?, snooze_count = snooze_count + 1, last_notified_at = NULL WHERE id = ?",
@@ -192,6 +216,34 @@ def reschedule_recurring(conn: sqlite3.Connection, reminder_id: int) -> Optional
         (due.isoformat(), reminder_id),
     )
     return get_reminder_by_id(conn, reminder_id)
+
+
+def reschedule_overdue_recurring(conn: sqlite3.Connection, older_than_minutes: int = 60) -> int:
+    """Bildirim penceresinden düşmüş tekrarlayan hatırlatıcıları ileri sarar.
+
+    `get_reminders_to_notify` vadesi 60 dakikadan fazla geçmiş kayıtları listeden
+    çıkarıyor (eski bildirimlerle boğmamak için). Ama ötelemeyi de o döngü yaptığı
+    için, sunucu bir saatten uzun kapalı kalırsa tekrarlayan hatırlatıcı hem
+    bildirilmiyor hem de bir daha asla ötelenmiyordu — sessizce ölüyordu.
+
+    Bu süpürme o boşluğu kapatıyor: bildirilme ihtimali kalmamış tekrarlayanları
+    bir sonraki periyoda taşır. Bildirim penceresindekilere (son 60 dk) dokunmaz,
+    yoksa kullanıcı bildirimi görmeden kayıt ilerlerdi.
+
+    Kaç kaydın ötelendiğini döner.
+    """
+    cutoff = now_local() - timedelta(minutes=older_than_minutes)
+    moved = 0
+
+    for r in list_reminders(conn, include_completed=False):
+        if r.get("recurrence", "none") == "none":
+            continue
+        if parse_dt(r["due_datetime"]) >= cutoff:
+            continue
+        if reschedule_recurring(conn, r["id"]):
+            moved += 1
+
+    return moved
 
 
 def update_last_notified(conn: sqlite3.Connection, reminder_id: int):

@@ -1,0 +1,4 @@
+# Sadece geliştirme/test için — sunucuya kurulmaz.
+# Kullanım:  pip install -r requirements-dev.txt  &&  pytest
+-r requirements.txt
+pytest==8.3.3

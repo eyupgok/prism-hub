@@ -17,8 +17,14 @@ class ExpenseCreate(BaseModel):
 
 @router.post("/")
 def create_expense(data: ExpenseCreate):
-    with get_db() as conn:
-        return service.create_expense(conn, data.amount, data.category, data.description, data.expense_date)
+    # Negatif tutar geçerlidir — iade demektir. Sadece sıfır ve saçma büyüklükler reddedilir.
+    try:
+        with get_db() as conn:
+            return service.create_expense(
+                conn, data.amount, data.category, data.description, data.expense_date
+            )
+    except service.InvalidAmount as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.get("/summary")

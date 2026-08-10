@@ -76,6 +76,23 @@ async def answer_callback_query(callback_query_id: str, text: str = ""):
         )
 
 
+async def send_document(
+    file_bytes: bytes,
+    filename: str,
+    caption: str = "",
+    chat_id: Optional[str] = None,
+) -> Dict:
+    """Dosya gönderir (veritabanı yedeği için). Telegram sınırı: 50 MB."""
+    target = chat_id or TELEGRAM_CHAT_ID
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            _api_url("sendDocument"),
+            data={"chat_id": target, "caption": caption, "parse_mode": "HTML"},
+            files={"document": (filename, file_bytes, "application/octet-stream")},
+        )
+        return resp.json()
+
+
 async def send_reminder_notification(reminder: Dict[str, Any]):
     from modules.reminders.service import format_reminder_notification
     text, keyboard = format_reminder_notification(reminder)
@@ -178,7 +195,7 @@ async def _handle_message(message: Dict[str, Any]):
             "• <i>İş notlarıma bak</i>\n"
             "• <i>Hava nasıl?</i>\n"
             "• <i>Sabah özetini ver</i>\n\n"
-            "Hızlı komutlar: /hava /ozet /liste /notlar /butce",
+            "Hızlı komutlar: /hava /ozet /liste /notlar /butce /yedek",
             chat_id=chat_id,
         )
         return
@@ -229,6 +246,17 @@ async def _handle_message(message: Dict[str, Any]):
                 f"• [{n['id']}] {html.escape(n['title'])} ({n['category']})" for n in notes
             ]
             await send_message("\n".join(lines), chat_id=chat_id)
+        return
+
+    if text == "/yedek":
+        from backup import send_backup
+
+        await send_message("🗄 Yedek hazırlanıyor...", chat_id=chat_id)
+        try:
+            if not await send_backup():
+                await send_message("❌ Yedek gönderilemedi, kayıtlara bak.", chat_id=chat_id)
+        except Exception as e:
+            await send_message(f"❌ Yedekleme hatası: {e}", chat_id=chat_id)
         return
 
     if text == "/butce":
@@ -303,6 +331,13 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
     chat_id = str(callback_query["message"]["chat"]["id"])
     message_id = callback_query["message"]["message_id"]
     data = callback_query.get("data", "")
+
+    # Güvenlik: mesajlarda olduğu gibi butonlarda da sadece yetkili kullanıcı.
+    # Butonlar doğrudan silme/değiştirme yapıyor, bu kontrolün eksik olması
+    # _handle_message ile asimetri yaratıyordu.
+    if TELEGRAM_CHAT_ID and chat_id != TELEGRAM_CHAT_ID:
+        await answer_callback_query(cb_id, "⛔ Yetkisiz")
+        return
 
     from database import get_db
     from modules.reminders import service as svc

@@ -98,7 +98,7 @@ reminders    (id, title, due_datetime, priority[1-3], is_completed, last_notifie
 
 notes        (id, title, content, category[iş|kişisel|genel|ders|fikir], created_at)
 
-expenses     (id, amount, category[yemek|ulaşım|eğlence|fatura|alışveriş|diğer],
+expenses     (id, amount ← NEGATİF = İADE, category[yemek|ulaşım|eğlence|fatura|alışveriş|diğer],
               description, expense_date, created_at,
               source[manual|notification|sms|receipt], source_hash, source_at)
               → UNIQUE INDEX idx_expenses_source_hash (source_hash) WHERE source_hash IS NOT NULL
@@ -214,11 +214,43 @@ geçici olanlarda (401/403/429/5xx) tekrar denenir.
 **Harcama değilse** (bakiye, iade, kampanya, şifre) endpoint 200 + `recorded: false` döner —
 telefon bunu hata saymaz, tekrar denemez.
 
+## İadeler
+
+**Negatif `amount` = iade.** Ayrı tablo/sütun yok; aylık toplam ve bütçe uyarısı zaten
+`SUM(amount)` olduğu için iade kendiliğinden düşülür. `service.validate_amount()` sıfırı
+ve `MAX_ABS_AMOUNT` üstünü reddeder (fişteki "1.234,56"nın 123456 okunmasını yakalamak için),
+negatifi serbest bırakır. Panel ve Android iadeyi yeşil `+` ile gösterir.
+
+Banka "iade edildi" bildirimi ve "200 TL iade aldım" cümlesi de eksi kaydedilir —
+ingest ve ai_router prompt'larında açıkça yazılı.
+
+Çift kayıt kontrolü iadeyi orijinal harcamayla eşleştirmez (+273.90 ile −273.90 arası fark
+547.80, eşik 0.005).
+
 ## Zamanlayıcı (scheduler.py)
 
-- **Her 1 dakika:** `check_reminders()` → bildirim zamanı gelen hatırlatıcıları bulur, Telegram'a gönderir, `last_notified_at` günceller. Tekrarlayan hatırlatıcı vadesi geçtiyse `reschedule_recurring()` ile bir sonraki periyoda öteler.
+- **Her 1 dakika:** `check_reminders()` → önce `reschedule_overdue_recurring()` ile bildirim
+  penceresinden düşmüş (60 dk'dan fazla gecikmiş) tekrarlayanları ileri sarar, sonra bildirim
+  zamanı gelenleri Telegram'a gönderir ve `last_notified_at` günceller.
+  ⚠️ Süpürme şart: `get_reminders_to_notify()` 60 dk'dan fazla gecikmişleri listeden çıkarıyor,
+  öteleme de eskiden sadece o döngüde yapılıyordu — sunucu 1 saatten uzun kapalı kalırsa
+  tekrarlayan hatırlatıcı sessizce ölüyordu.
 - **Her gün 08:00 (Europe/Istanbul):** `send_morning_summary()` → hava + görevler + harcama + notlar özetini Telegram'a gönderir.
 - **Her gece 03:00:** `cleanup_conversations()` → 30 günden eski konuşma kayıtlarını siler.
+- **Her gece 04:00:** `nightly_backup()` → `backup.py` SQLite backup API ile tutarlı kopya alır,
+  gzip'ler, Telegram'a dosya olarak gönderir. `/yedek` komutuyla elle de tetiklenir.
+  Sunucu tamamen kaybolsa bile yedek Telegram sohbetinde durur.
+
+## Testler
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+`tests/` — harcama doğrulaması ve iadeler, çift kayıt tespiti, hatırlatıcı öteleme/erteleme
+mantığı, yedeğin geri yüklenebilirliği. Her test geçici veritabanı kullanır (`conftest.py`),
+gerçek `prism.db`'ye dokunulmaz.
 
 **Öncelik bazlı bildirim sıklığı** (`get_notification_interval()`):
 - Kritik (1): son 1 saatte 15 dk'da bir, 1-3 saatte 30 dk'da bir...
