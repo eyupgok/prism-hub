@@ -44,44 +44,66 @@ def parse_local(iso: Optional[str]) -> Optional[datetime]:
     return TZ.localize(parsed) if parsed.tzinfo is None else parsed.astimezone(TZ)
 
 
+# Otomatik yakalanan kaynaklar. Elle girilenler (manual) bilerek dışarıda:
+# kullanıcı aynı tutarı iki kez girdiyse bunu bilerek yapmıştır.
+AUTO_SOURCES = ("notification", "sms", "receipt")
+
+
 def find_duplicate(
     conn: sqlite3.Connection,
     amount: float,
-    source_at: Optional[str],
+    source_at: Optional[str] = None,
     window_minutes: int = 5,
+    expense_date: Optional[str] = None,
+    day_level: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """Aynı alışverişin ikinci bildirimi mi?
+    """Aynı alışveriş başka bir yoldan zaten kaydedilmiş mi?
 
-    Aynı harcama hem bankanın uygulamasından hem SMS'ten gelebiliyor; metinleri
-    farklı olduğu için `source_hash` bunu yakalayamaz. Burada tutar + zaman
-    yakınlığına bakıyoruz.
+    Aynı harcama banka uygulamasından, SMS'ten ve fiş fotoğrafından gelebiliyor;
+    metinleri farklı olduğu için `source_hash` bunları eşleştiremez. Burada tutara
+    ve zamana bakıyoruz.
 
-    Sadece OTOMATİK yakalanan kayıtlara bakar — kullanıcı elle iki aynı harcama
-    girdiyse ona karışmayız. Karşılaştırma `source_at` (bildirimin telefona düştüğü an)
-    üzerinden yapılır, kayıt anı üzerinden değil; telefon çevrimdışıyken biriktirip
-    sonra gönderdiğinde de doğru çalışsın diye.
+    İki kıyaslama seviyesi var:
+    - **Dakika**: iki kaydın da saati biliniyorsa, fark `window_minutes` içindeyse aynı sayılır.
+    - **Gün** (`day_level=True`): saat bilinmiyorsa aynı gün + aynı tutar yeterli sayılır.
+      Fiş fotoğrafında saat okunamayabildiği için gerekli; bildirim yolunda kullanılmaz
+      çünkü orada saat her zaman var ve gün seviyesi fazla geniş kalır.
+
+    Karşılaştırma `source_at` (olayın gerçekleştiği an) üzerinden yapılır, kayıt anı
+    üzerinden değil — telefon çevrimdışıyken biriktirip sonra gönderdiğinde de doğru olsun diye.
     """
     reference = parse_local(source_at)
-    if reference is None:
+    day = reference.strftime("%Y-%m-%d") if reference else expense_date
+    if not day:
         return None
 
-    window = timedelta(minutes=window_minutes)
-    day = reference.strftime("%Y-%m-%d")
+    placeholders = ",".join("?" * len(AUTO_SOURCES))
     neighbours = conn.execute(
-        """SELECT * FROM expenses
-           WHERE source IN ('notification', 'sms')
-             AND source_at IS NOT NULL
-             AND expense_date IN (?, date(?, '-1 day'), date(?, '+1 day'))""",
-        (day, day, day),
+        f"""SELECT * FROM expenses
+            WHERE source IN ({placeholders})
+              AND expense_date IN (?, date(?, '-1 day'), date(?, '+1 day'))""",
+        (*AUTO_SOURCES, day, day, day),
     ).fetchall()
+
+    window = timedelta(minutes=window_minutes)
+    same_day_match: Optional[Dict[str, Any]] = None
 
     for row in neighbours:
         if abs(row["amount"] - amount) > 0.005:
             continue
+
         other = parse_local(row["source_at"])
-        if other is not None and abs(other - reference) <= window:
-            return dict(row)
-    return None
+        if reference is not None and other is not None:
+            if abs(other - reference) <= window:
+                return dict(row)
+            # İkisinin de saati belli ve aralık geniş → ayrı alışverişler
+            continue
+
+        # En az birinin saati yok; ancak gün seviyesinde kıyaslanabilir
+        if day_level and row["expense_date"] == day and same_day_match is None:
+            same_day_match = dict(row)
+
+    return same_day_match
 
 
 def get_expense_by_source_hash(conn: sqlite3.Connection, source_hash: str) -> Optional[Dict[str, Any]]:

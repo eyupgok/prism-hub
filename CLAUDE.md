@@ -100,7 +100,7 @@ notes        (id, title, content, category[iş|kişisel|genel|ders|fikir], creat
 
 expenses     (id, amount, category[yemek|ulaşım|eğlence|fatura|alışveriş|diğer],
               description, expense_date, created_at,
-              source[manual|notification|sms], source_hash, source_at)
+              source[manual|notification|sms|receipt], source_hash, source_at)
               → UNIQUE INDEX idx_expenses_source_hash (source_hash) WHERE source_hash IS NOT NULL
               → source_at = bildirimin TELEFONA DÜŞTÜĞÜ an (kayıt anı değil). Çevrimdışı
                 kuyruk yüzünden kayıt saatlerce sonra gelebiliyor; çift kayıt kontrolü
@@ -183,13 +183,24 @@ seçtiği bankacılık uygulamalarının bildirimlerini yakalar → `POST /api/e
 **İki katmanlı çift kayıt koruması:**
 1. `source_hash = sha256(paket|metin|dakika)` — **aynı** bildirimin yeniden gönderimi
    (DB'de UNIQUE index)
-2. `service.find_duplicate()` — **farklı** bildirimler ama aynı alışveriş: aynı tutar +
-   `source_at` farkı ≤ `EXPENSE_DUPLICATE_WINDOW_MINUTES` (varsayılan 5) + ikisi de otomatik
-   yakalanmış. Bir alışveriş hem banka uygulamasından hem SMS'ten gelebiliyor, metinleri
-   farklı olduğu için 1. katman bunu yakalayamaz.
+2. `service.find_duplicate()` — **farklı** kaynaklardan gelen aynı alışveriş. Aynı tutar +
+   zaman yakınlığı. İki kıyaslama seviyesi var:
+   - **dakika**: iki kaydın da `source_at`'i varsa, fark ≤ `EXPENSE_DUPLICATE_WINDOW_MINUTES`
+     (varsayılan 5). Bildirim/SMS yolu bunu kullanır (`day_level=False`).
+   - **gün** (`day_level=True`): saat bilinmiyorsa aynı gün + aynı tutar yeterli.
+     Fiş fotoğrafı yolu bunu kullanır, çünkü fişte saat okunamayabiliyor.
+
+   `AUTO_SOURCES = (notification, sms, receipt)` — bu üçü birbiriyle karşılaştırılır.
+   Aynı alışveriş hem banka bildiriminden, hem SMS'ten, hem de fiş fotoğrafından girilebiliyor;
+   metinleri farklı olduğu için 1. katman bunları eşleştiremez.
 
 Elle girilen (`source='manual'`) kayıtlara karışılmaz — kullanıcı bilerek aynı tutarı iki kez
-girmiş olabilir. Elenen kayıt sessizce yutulmaz: Telegram'a `[➕ Yine de kaydet]` butonlu bir
+girmiş olabilir.
+
+**Fiş fotoğrafı yolu:** `ai_router` system prompt'u fiş görselinde `from_receipt: true` ve
+mümkünse `expense_time` istiyor. `_check_receipt_duplicate()` kaydetmeden önce kontrol eder;
+çift çıkarsa kaydetmez, Telegram'a `[➕ Yine de kaydet]` butonlu not düşer. Kaydedilirse
+`source='receipt'` ve `source_at` (fişteki an) yazılır — sonraki kontroller bunu görür. Elenen kayıt sessizce yutulmaz: Telegram'a `[➕ Yine de kaydet]` butonlu bir
 not düşer (token bellekte, 1 saat ömürlü). Aynı bildirim tekrar gelirse ikinci not gönderilmez
 (`_suppressed_hashes`).
 

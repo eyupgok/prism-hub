@@ -2,7 +2,7 @@ import html
 import os
 import json
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import pytz
 from groq import AsyncGroq
 
@@ -39,7 +39,7 @@ notes.search → query(str)
 notes.update → id(int), title(str opsiyonel), content(str opsiyonel), category(str opsiyonel)
 notes.delete → id(int)
 
-expenses.create → amount(float), category(yemek|ulaşım|eğlence|fatura|alışveriş|diğer), description(str opsiyonel), expense_date(YYYY-MM-DD opsiyonel — sadece geçmiş bir günden bahsediliyorsa doldur)
+expenses.create → amount(float), category(yemek|ulaşım|eğlence|fatura|alışveriş|diğer), description(str opsiyonel), expense_date(YYYY-MM-DD opsiyonel — sadece geçmiş bir günden bahsediliyorsa doldur), expense_time(HH:MM opsiyonel — fiş/faturada saat yazıyorsa), from_receipt(bool opsiyonel — bilgi fiş/fatura görselinden okunduysa true)
 expenses.list → month(YYYY-MM opsiyonel)
 expenses.summary → month(YYYY-MM opsiyonel)
 expenses.delete → id(int)
@@ -108,6 +108,8 @@ Geçmiş tarihli harcama:
 ## GÖRSEL MESAJLAR
 Kullanıcı fotoğraf gönderirse mesajda "[Görsel analizi]: ..." bloğu bulunur — bu, gönderilen fotoğrafın içeriğidir.
 - Fiş/fatura analiziyse ve kullanıcı kaydetmek istiyorsa (veya sadece fiş gönderip hiçbir şey yazmadıysa) expenses.create kullan: tutar, kategori, işyeri adını description'a, fişteki tarih bugünden farklıysa expense_date'e yaz.
+  Ayrıca **from_receipt: true** gönder. Fişte saat de yazıyorsa expense_time'a yaz (örn. "18:42") —
+  aynı alışverişin banka bildiriminden zaten kaydedilmiş olup olmadığı buna bakılarak anlaşılıyor.
 - Kullanıcı görselle ilgili soru soruyorsa chat.respond ile görsel analizine dayanarak yanıtla.
 - Kullanıcı "not al" diyorsa görseldeki metni notes.create ile kaydet.
 
@@ -327,18 +329,89 @@ async def _handle_notes(action: str, params: Dict) -> str:
     return f"❓ Bilinmeyen aksiyon: {action}"
 
 
+def _receipt_moment(params: Dict) -> Optional[str]:
+    """Fişteki tarih + saatten ISO bir an üretir. Saat okunamadıysa None döner —
+    o zaman çift kayıt kontrolü gün seviyesine düşer."""
+    time_str = (params.get("expense_time") or "").strip()
+    if not time_str:
+        return None
+
+    day = params.get("expense_date") or datetime.now(TZ).strftime("%Y-%m-%d")
+    try:
+        return datetime.strptime(f"{day} {time_str}", "%Y-%m-%d %H:%M").isoformat()
+    except ValueError:
+        return None
+
+
+async def _check_receipt_duplicate(conn, params: Dict) -> Optional[str]:
+    """Fişteki alışveriş zaten kayıtlıysa uyarı metni döner, değilse None."""
+    from modules.expenses import service as svc
+    from modules.expenses.ingest import (
+        DUPLICATE_WINDOW_MINUTES,
+        format_tl,
+        remember_duplicate,
+    )
+    from telegram_bot import send_message
+
+    expense_date = params.get("expense_date") or datetime.now(TZ).strftime("%Y-%m-%d")
+    source_at = _receipt_moment(params)
+
+    twin = svc.find_duplicate(
+        conn,
+        params["amount"],
+        source_at=source_at,
+        window_minutes=DUPLICATE_WINDOW_MINUTES,
+        expense_date=expense_date,
+        day_level=True,   # fişte saat olmayabilir
+    )
+    if not twin:
+        return None
+
+    candidate = {
+        "amount": params["amount"],
+        "category": params.get("category", "diğer"),
+        "description": params.get("description", "") or "Fiş",
+        "expense_date": expense_date,
+        "source": "receipt",
+        "source_hash": None,
+        "source_at": source_at,
+    }
+    token = remember_duplicate(candidate)
+
+    await send_message(
+        "\n".join([
+            "🔁 <b>Bu alışveriş zaten kayıtlı görünüyor</b>",
+            f"{format_tl(params['amount'])} TL · {_esc(candidate['description'])}",
+            f"<i>Mevcut kayıt: #{twin['id']} — {_esc(twin['description'])} ({twin['expense_date']})</i>",
+        ]),
+        reply_markup={"inline_keyboard": [[
+            {"text": "➕ Yine de kaydet", "callback_data": f"dupadd_{token}"},
+        ]]},
+    )
+    return "🔁 Bu alışveriş zaten kayıtlı — aşağıdaki mesajdan yine de ekleyebilirsin."
+
+
 async def _handle_expenses(action: str, params: Dict) -> str:
     from database import get_db
     from modules.expenses import service as svc
 
     with get_db() as conn:
         if action == "create":
+            # Fişten okunan harcama, banka bildiriminden zaten kaydedilmiş olabilir.
+            # Elle yazılan harcamalara karışmıyoruz — kullanıcı bilerek girmiştir.
+            if params.get("from_receipt"):
+                warning = await _check_receipt_duplicate(conn, params)
+                if warning:
+                    return warning
+
             e = svc.create_expense(
                 conn,
                 params["amount"],
                 params.get("category", "diğer"),
                 params.get("description", ""),
                 params.get("expense_date"),
+                source="receipt" if params.get("from_receipt") else "manual",
+                source_at=_receipt_moment(params) if params.get("from_receipt") else None,
             )
             msg = (
                 f"💰 Harcama kaydedildi!\n"
