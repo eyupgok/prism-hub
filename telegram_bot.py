@@ -6,6 +6,10 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Request, HTTPException
 from typing import Dict, Any, Optional
 
+from logging_setup import get_logger
+
+log = get_logger("prism.telegram")
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
@@ -104,16 +108,16 @@ async def set_webhook(webhook_url: str):
     if TELEGRAM_WEBHOOK_SECRET:
         payload["secret_token"] = TELEGRAM_WEBHOOK_SECRET
     else:
-        print("⚠️  TELEGRAM_WEBHOOK_SECRET ayarlanmamış — webhook imza doğrulaması devre dışı")
+        log.warning("⚠️  TELEGRAM_WEBHOOK_SECRET ayarlanmamış — webhook imza doğrulaması devre dışı")
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(_api_url("setWebhook"), json=payload)
         data = resp.json()
 
     if data.get("ok"):
-        print(f"✅ Telegram webhook ayarlandı: {webhook_url}")
+        log.info(f"✅ Telegram webhook ayarlandı: {webhook_url}")
     else:
-        print(f"❌ Webhook hatası: {data}")
+        log.error(f"❌ Webhook hatası: {data}")
 
     return data
 
@@ -165,7 +169,7 @@ async def _process_update(update: Dict[str, Any]):
         elif "callback_query" in update:
             await _handle_callback_query(update["callback_query"])
     except Exception as e:
-        print(f"❌ Telegram update işlenemedi: {e}")
+        log.error(f"❌ Telegram update işlenemedi: {e}")
 
 
 async def _handle_message(message: Dict[str, Any]):
@@ -195,7 +199,7 @@ async def _handle_message(message: Dict[str, Any]):
             "• <i>İş notlarıma bak</i>\n"
             "• <i>Hava nasıl?</i>\n"
             "• <i>Sabah özetini ver</i>\n\n"
-            "Hızlı komutlar: /hava /ozet /liste /notlar /butce /yedek",
+            "Hızlı komutlar: /hava /ozet /aksam /hafta /liste /notlar /butce /yedek",
             chat_id=chat_id,
         )
         return
@@ -246,6 +250,19 @@ async def _handle_message(message: Dict[str, Any]):
                 f"• [{n['id']}] {html.escape(n['title'])} ({n['category']})" for n in notes
             ]
             await send_message("\n".join(lines), chat_id=chat_id)
+        return
+
+    if text in ("/aksam", "/hafta"):
+        from modules.summary import service as summary_svc
+        try:
+            builder = (
+                summary_svc.get_evening_summary if text == "/aksam"
+                else summary_svc.get_weekly_report
+            )
+            await send_message(await builder(), chat_id=chat_id)
+        except Exception:
+            log.exception("Özet oluşturulamadı (%s)", text)
+            await send_message("❌ Özet oluşturulamadı, kayıtlara baktım.", chat_id=chat_id)
         return
 
     if text == "/yedek":

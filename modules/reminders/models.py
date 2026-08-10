@@ -15,8 +15,18 @@ def create_reminders_table(conn: sqlite3.Connection):
             created_at       TEXT    NOT NULL
         )
     """)
-    # Mevcut DB'ler için migration
-    try:
+    _migrate_reminders(conn)
+
+
+def _migrate_reminders(conn: sqlite3.Connection):
+    """Eski veritabanlarına sonradan eklenen sütunları ekler (idempotent)."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(reminders)")}
+
+    if "recurrence" not in existing:
         conn.execute("ALTER TABLE reminders ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'none'")
-    except Exception:
-        pass
+
+    if "completed_at" not in existing:
+        # Tamamlanma anı: "bugün kaç görev bitirdin", "bu hafta nasıl geçti" gibi
+        # sorulara cevap verebilmek için gerekli. Sadece is_completed=1 bilgisi
+        # ne zaman olduğunu söylemiyor.
+        conn.execute("ALTER TABLE reminders ADD COLUMN completed_at TEXT")

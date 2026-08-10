@@ -4,7 +4,11 @@ import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import pytz
-from groq import AsyncGroq
+
+from groq_client import complete_json
+from logging_setup import get_logger
+
+log = get_logger("prism.ai")
 
 TZ = pytz.timezone("Europe/Istanbul")
 
@@ -124,6 +128,17 @@ Eğer mesaj hiçbir kategoriye girmiyorsa, PRISM olarak samimi ve kısa Türkçe
 
 Selamlaşma, teşekkür, "nasılsın" gibi sorulara da sohbet modunda yanıt ver ama PRISM kimliğini koru.
 
+## BİRDEN FAZLA İŞ
+Kullanıcı tek mesajda birden fazla şey isterse HEPSİNİ yap. Bu durumda komutları dizi olarak döndür:
+
+{{"commands": [
+  {{"module": "reminders", "action": "create", "params": {{...}}}},
+  {{"module": "expenses", "action": "create", "params": {{...}}}}
+]}}
+
+Örnek: "Yarın 10'da toplantı hatırlat ve 50 TL yemek ekle" → iki komutlu dizi.
+Tek iş varsa diziye sarma, doğrudan tek nesne döndür.
+
 ## ÖNEMLİ
 - SADECE JSON döndür, açıklama yazma
 - due_datetime her zaman ISO 8601 formatında olsun: YYYY-MM-DDTHH:MM:SS
@@ -136,15 +151,11 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 HISTORY_LIMIT = 10
 
 
-def _groq_client() -> AsyncGroq:
-    key = os.getenv("GROQ_API_KEY", "")
-    if not key:
-        raise RuntimeError("GROQ_API_KEY ortam değişkeni ayarlanmamış")
-    return AsyncGroq(api_key=key)
-
-
 async def parse_message(user_message: str, history: List[Dict] = None) -> Dict[str, Any]:
-    """Kullanıcı mesajını Groq'a gönderir ve JSON komut olarak döner"""
+    """Kullanıcı mesajını Groq'a gönderir ve JSON komut olarak döner.
+
+    JSON modu ve model yedeği `groq_client.complete_json()` içinde hallediliyor.
+    """
     now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     today_str = datetime.now(TZ).strftime("%Y-%m-%d")
     system = SYSTEM_PROMPT.format(now=now_str, today=today_str)
@@ -154,28 +165,39 @@ async def parse_message(user_message: str, history: List[Dict] = None) -> Dict[s
         messages.extend(history)
     messages.append({"role": "user", "content": user_message})
 
-    client = _groq_client()
-    response = await client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=messages,
-        temperature=0.1,
-        max_tokens=400,
-    )
+    return await complete_json(messages, max_tokens=500)
 
-    raw = response.choices[0].message.content.strip()
 
-    if "```" in raw:
-        parts = raw.split("```")
-        raw = parts[1] if len(parts) > 1 else raw
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
-
-    return json.loads(raw)
+# Tek mesajda çalıştırılacak azami komut sayısı — modelin uçmuş bir çıktısı
+# yüzünden onlarca işlem yapılmasın.
+MAX_COMMANDS = 5
 
 
 async def dispatch(parsed: Dict[str, Any]) -> str:
-    """Parse edilmiş JSON komutunu ilgili servis fonksiyonuna yönlendirir"""
+    """Komut(ları) çalıştırır.
+
+    İki biçim kabul edilir:
+    - Tek iş:     {"module": ..., "action": ..., "params": {...}}
+    - Çoklu iş:   {"commands": [ {...}, {...} ]}
+
+    Kullanıcı "yarın 10'da toplantı hatırlat ve 50 TL yemek ekle" dediğinde
+    eskiden tek JSON dönüyordu ve ikinci iş sessizce kayboluyordu.
+    """
+    commands = parsed.get("commands")
+    if isinstance(commands, list) and commands:
+        results = []
+        for command in commands[:MAX_COMMANDS]:
+            if isinstance(command, dict):
+                results.append(await dispatch_one(command))
+        if len(commands) > MAX_COMMANDS:
+            results.append(f"<i>({len(commands) - MAX_COMMANDS} komut atlandı)</i>")
+        return "\n\n".join(r for r in results if r)
+
+    return await dispatch_one(parsed)
+
+
+async def dispatch_one(parsed: Dict[str, Any]) -> str:
+    """Tek bir komutu ilgili servis fonksiyonuna yönlendirir"""
     module = parsed.get("module")
     action = parsed.get("action")
     params = parsed.get("params", {})
@@ -207,8 +229,14 @@ async def dispatch(parsed: Dict[str, Any]) -> str:
 
         return f"❓ Bilinmeyen modül: {module}"
 
-    except Exception as e:
-        return f"⚠️ İşlem sırasında hata oluştu: {e}"
+    except KeyError as e:
+        # Groq beklenen bir parametreyi göndermemiş — kullanıcıya anlaşılır bir şey söyle
+        log.warning("Eksik parametre: modül=%s aksiyon=%s alan=%s", module, action, e)
+        return "⚠️ Ne yapmam gerektiğini tam anlayamadım. Biraz daha açık yazar mısın?"
+    except Exception:
+        # Hata izi kayıtlara; kullanıcıya iç detay (dosya yolu, SQL, API mesajı) gitmesin
+        log.exception("Komut çalıştırılamadı: modül=%s aksiyon=%s", module, action)
+        return "⚠️ İşlem sırasında bir hata oluştu. Kayıtlara not düştüm."
 
 
 async def _handle_reminders(action: str, params: Dict) -> str:
@@ -503,6 +531,8 @@ async def route_message(user_message: str, chat_id: str = "") -> str:
 
         return response
     except json.JSONDecodeError:
-        return "⚠️ AI yanıtı işlenemedi. Lütfen mesajınızı farklı şekilde ifade edin."
-    except Exception as e:
-        return f"⚠️ Hata oluştu: {e}"
+        log.warning("Groq geçerli JSON döndürmedi")
+        return "⚠️ Yanıtı işleyemedim. Mesajını biraz farklı ifade eder misin?"
+    except Exception:
+        log.exception("Mesaj yönlendirilemedi")
+        return "⚠️ Bir hata oluştu. Kayıtlara not düştüm, tekrar dener misin?"

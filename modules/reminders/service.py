@@ -121,8 +121,32 @@ def complete_reminder(conn: sqlite3.Connection, reminder_id: int) -> Optional[Di
         if updated:
             updated["rescheduled"] = True
             return updated
-    conn.execute("UPDATE reminders SET is_completed = 1 WHERE id = ?", (reminder_id,))
+    conn.execute(
+        "UPDATE reminders SET is_completed = 1, completed_at = ? WHERE id = ?",
+        (now_local().isoformat(), reminder_id),
+    )
     return get_reminder_by_id(conn, reminder_id)
+
+
+def count_completed_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> int:
+    """İki an arasında tamamlanan görev sayısı (akşam özeti ve haftalık rapor için)."""
+    row = conn.execute(
+        "SELECT COUNT(*) c FROM reminders WHERE completed_at >= ? AND completed_at < ?",
+        (start.isoformat(), end.isoformat()),
+    ).fetchone()
+    return row["c"]
+
+
+def list_due_between(
+    conn: sqlite3.Connection, start: datetime, end: datetime
+) -> List[Dict[str, Any]]:
+    """Belirtilen aralıkta vadesi olan, tamamlanmamış hatırlatıcılar."""
+    result = []
+    for r in list_reminders(conn, include_completed=False):
+        due = parse_dt(r["due_datetime"])
+        if start <= due < end:
+            result.append(r)
+    return result
 
 
 def delete_reminder(conn: sqlite3.Connection, reminder_id: int) -> bool:

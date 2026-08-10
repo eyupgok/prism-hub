@@ -22,9 +22,13 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 import pytz
-from groq import AsyncGroq
 
+from groq_client import complete_json
 from modules.expenses import service
+
+from logging_setup import get_logger
+
+log = get_logger("prism.expenses.ingest")
 
 TZ = pytz.timezone("Europe/Istanbul")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -107,17 +111,14 @@ async def parse_notification(title: str, text: str) -> Dict[str, Any]:
     """Bildirim metnini Groq'a okutup yapılandırılmış sonuç döner."""
     content = f"{title}\n{text}".strip() if title else text.strip()
 
-    client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY", ""))
-    response = await client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[
+    # JSON modu ve model yedeği ortak sarmalayıcıda
+    parsed = await complete_json(
+        [
             {"role": "system", "content": _PARSE_PROMPT},
             {"role": "user", "content": content},
         ],
-        temperature=0.1,
         max_tokens=300,
     )
-    parsed = _extract_json(response.choices[0].message.content)
 
     amount = parsed.get("amount")
     try:
@@ -235,7 +236,7 @@ async def ingest_notification(
     try:
         parsed = await parse_notification(title or "", text)
     except Exception as e:
-        print(f"❌ Bildirim çözümlenemedi ({package_name}): {type(e).__name__}: {e}")
+        log.error(f"❌ Bildirim çözümlenemedi ({package_name}): {type(e).__name__}: {e}")
         return {"recorded": False, "reason": "Metin çözümlenemedi", "expense": None}
 
     if not parsed["is_expense"]:
@@ -273,7 +274,7 @@ async def ingest_notification(
             expense = service.create_expense(conn, **candidate)
             alert = service.check_budget_alert(conn, expense["category"])
     except service.InvalidAmount as e:
-        print(f"⚠️  Bildirimden gelen tutar reddedildi ({package_name}): {e}")
+        log.warning(f"⚠️  Bildirimden gelen tutar reddedildi ({package_name}): {e}")
         return {"recorded": False, "reason": f"Tutar geçersiz: {e}", "expense": None}
 
     await _notify_telegram(expense, alert)
@@ -335,7 +336,7 @@ async def _notify_duplicate(candidate: Dict[str, Any], existing: Dict[str, Any])
     try:
         await send_message(text, reply_markup=keyboard)
     except Exception as e:
-        print(f"⚠️  Çift kayıt bildirimi gönderilemedi: {e}")
+        log.warning(f"⚠️  Çift kayıt bildirimi gönderilemedi: {e}")
 
 
 async def _notify_telegram(expense: Dict[str, Any], alert: Optional[str]):
@@ -349,4 +350,4 @@ async def _notify_telegram(expense: Dict[str, Any], alert: Optional[str]):
         )
     except Exception as e:
         # Bildirim gitmese bile harcama kaydı durur; sadece haber verilemez.
-        print(f"⚠️  Harcama bildirimi gönderilemedi (id={expense['id']}): {e}")
+        log.warning(f"⚠️  Harcama bildirimi gönderilemedi (id={expense['id']}): {e}")

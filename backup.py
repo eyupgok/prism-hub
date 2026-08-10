@@ -18,6 +18,10 @@ from datetime import datetime
 
 import pytz
 
+from logging_setup import get_logger
+
+log = get_logger("prism.backup")
+
 TZ = pytz.timezone("Europe/Istanbul")
 
 # Telegram sendDocument sınırı 50 MB; sıkıştırılmış yedek bunu aşarsa gönderilemez.
@@ -70,7 +74,7 @@ async def send_backup() -> bool:
     try:
         blob = create_snapshot()
     except Exception as e:
-        print(f"❌ Yedek alınamadı: {type(e).__name__}: {e}")
+        log.error(f"❌ Yedek alınamadı: {type(e).__name__}: {e}")
         try:
             await send_message(f"❌ Veritabanı yedeği alınamadı: {type(e).__name__}")
         except Exception:
@@ -78,7 +82,7 @@ async def send_backup() -> bool:
         return False
 
     if len(blob) > TELEGRAM_FILE_LIMIT:
-        print(f"❌ Yedek çok büyük ({_human_size(len(blob))}), Telegram'a gönderilemez")
+        log.error("❌ Yedek çok büyük (%s), Telegram'a gönderilemez", _human_size(len(blob)))
         await send_message(
             f"⚠️ Veritabanı yedeği {_human_size(len(blob))} oldu, Telegram sınırını (50 MB) aştı.\n"
             "Yedekleme için başka bir yol kurmak gerekiyor."
@@ -106,8 +110,8 @@ async def send_backup() -> bool:
 
     result = await send_document(blob, filename, caption)
     if result.get("ok"):
-        print(f"✅ Yedek gönderildi: {filename} ({_human_size(len(blob))})")
+        log.info("✅ Yedek gönderildi: %s (%s)", filename, _human_size(len(blob)))
         return True
 
-    print(f"❌ Yedek gönderilemedi: {result}")
+    log.error(f"❌ Yedek gönderilemedi: {result}")
     return False

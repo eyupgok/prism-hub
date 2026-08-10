@@ -2,6 +2,10 @@ import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from logging_setup import get_logger
+
+log = get_logger("prism.scheduler")
+
 TZ = pytz.timezone("Europe/Istanbul")
 scheduler = AsyncIOScheduler(timezone=TZ)
 
@@ -17,7 +21,7 @@ async def check_reminders():
         # geçmişte takılı kalıyor — önce onları bir sonraki periyoda taşı.
         moved = svc.reschedule_overdue_recurring(conn)
         if moved:
-            print(f"🔁 {moved} gecikmiş tekrarlayan hatırlatıcı sonraki periyoda taşındı")
+            log.info(f"🔁 {moved} gecikmiş tekrarlayan hatırlatıcı sonraki periyoda taşındı")
 
         to_notify = svc.get_reminders_to_notify(conn)
 
@@ -32,7 +36,7 @@ async def check_reminders():
                     if due < svc.now_local():
                         svc.reschedule_recurring(conn, reminder["id"])
         except Exception as e:
-            print(f"❌ Bildirim gönderilemedi [ID={reminder['id']}]: {e}")
+            log.error(f"❌ Bildirim gönderilemedi [ID={reminder['id']}]: {e}")
 
 
 async def cleanup_conversations():
@@ -42,9 +46,9 @@ async def cleanup_conversations():
     try:
         deleted = delete_old_conversations(30)
         if deleted:
-            print(f"🧹 {deleted} eski konuşma kaydı silindi")
+            log.info(f"🧹 {deleted} eski konuşma kaydı silindi")
     except Exception as e:
-        print(f"❌ Konuşma temizliği başarısız: {e}")
+        log.error(f"❌ Konuşma temizliği başarısız: {e}")
 
 
 async def nightly_backup():
@@ -58,7 +62,7 @@ async def nightly_backup():
     try:
         await send_backup()
     except Exception as e:
-        print(f"❌ Yedekleme işi çöktü: {type(e).__name__}: {e}")
+        log.error(f"❌ Yedekleme işi çöktü: {type(e).__name__}: {e}")
 
 
 async def send_morning_summary():
@@ -69,9 +73,33 @@ async def send_morning_summary():
     try:
         text = await summary_svc.get_morning_summary()
         await send_message(text)
-        print("✅ Sabah özeti gönderildi")
+        log.info("✅ Sabah özeti gönderildi")
     except Exception as e:
-        print(f"❌ Sabah özeti gönderilemedi: {e}")
+        log.error(f"❌ Sabah özeti gönderilemedi: {e}")
+
+
+async def send_evening_summary():
+    """Her akşam 21:00'de günün karnesini gönderir"""
+    from modules.summary import service as summary_svc
+    from telegram_bot import send_message
+
+    try:
+        await send_message(await summary_svc.get_evening_summary())
+        log.info("✅ Akşam özeti gönderildi")
+    except Exception:
+        log.exception("❌ Akşam özeti gönderilemedi")
+
+
+async def send_weekly_report():
+    """Her pazar 20:00'de haftalık raporu gönderir"""
+    from modules.summary import service as summary_svc
+    from telegram_bot import send_message
+
+    try:
+        await send_message(await summary_svc.get_weekly_report())
+        log.info("✅ Haftalık rapor gönderildi")
+    except Exception:
+        log.exception("❌ Haftalık rapor gönderilemedi")
 
 
 def start_scheduler():
@@ -108,14 +136,30 @@ def start_scheduler():
         max_instances=1,
     )
 
+    scheduler.add_job(
+        send_evening_summary,
+        CronTrigger(hour=21, minute=0, timezone=TZ),
+        id="evening_summary",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    scheduler.add_job(
+        send_weekly_report,
+        CronTrigger(day_of_week="sun", hour=20, minute=0, timezone=TZ),
+        id="weekly_report",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     scheduler.start()
-    print(
-        "✅ Zamanlayıcı başlatıldı "
-        "(hatırlatıcı: 1 dk, sabah özeti: 08:00, temizlik: 03:00, yedek: 04:00)"
+    log.info(
+        "✅ Zamanlayıcı başlatıldı (hatırlatıcı: 1 dk · sabah 08:00 · akşam 21:00 · "
+        "haftalık pazar 20:00 · temizlik 03:00 · yedek 04:00)"
     )
 
 
 def stop_scheduler():
     if scheduler.running:
         scheduler.shutdown(wait=False)
-        print("⏹ Zamanlayıcı durduruldu")
+        log.info("⏹ Zamanlayıcı durduruldu")

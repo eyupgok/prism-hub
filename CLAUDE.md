@@ -19,7 +19,13 @@ Oracle Cloud Always Free VM'de kendi kendine barındırılan, SQLite tabanlı, m
 ## Dosya Yapısı
 
 ```
-main.py              → FastAPI app, lifespan, tüm router'lar, CORS (CORS_ORIGINS env)
+main.py              → FastAPI app, lifespan, tüm router'lar, CORS (CORS_ORIGINS env),
+                       /health (veritabanı + zamanlayıcı kontrolü; bozuksa 503)
+logging_setup.py     → Tek yerden loglama. `print()` KULLANMA — `get_logger(__name__)`.
+                       httpx/apscheduler gürültüsü kısılmış. LOG_LEVEL env ile ayarlanır.
+groq_client.py       → Groq çağrıları için ortak sarmalayıcı: JSON modu
+                       (response_format) + ana model başarısızsa GROQ_FALLBACK_MODEL
+backup.py            → SQLite backup API ile tutarlı kopya → gzip → Telegram'a dosya
 auth.py              → İki yollu doğrulama: X-API-Key başlığı (Android) VEYA prism_session
                        çerezi (web paneli). Oturum bileti HMAC imzalı + son kullanma tarihli,
                        sunucuda saklanmaz. İmza anahtarı API_KEY'den türetilir — API_KEY
@@ -124,6 +130,10 @@ conversations (id, chat_id, role[user|assistant], content, created_at)
 4. Groq saf JSON döner: `{"module": "...", "action": "...", "params": {...}}`
 5. `dispatch(parsed)` → ilgili `_handle_*` fonksiyonuna yönlendirir
 6. Kullanıcı mesajı ve Groq'un JSON yanıtı `conversations` tablosuna kaydedilir
+
+**Çoklu komut:** Tek mesajda birden fazla iş varsa Groq `{"commands": [ {...}, {...} ]}`
+döndürür; `dispatch()` diziyi görürse hepsini sırayla çalıştırıp yanıtları birleştirir
+(en fazla `MAX_COMMANDS`=5). Tek iş varsa eski tekil biçim aynen çalışır.
 
 **Modüller ve aksiyonlar:**
 ```
@@ -237,6 +247,10 @@ ingest ve ai_router prompt'larında açıkça yazılı.
   tekrarlayan hatırlatıcı sessizce ölüyordu.
 - **Her gün 08:00 (Europe/Istanbul):** `send_morning_summary()` → hava + görevler + harcama + notlar özetini Telegram'a gönderir.
 - **Her gece 03:00:** `cleanup_conversations()` → 30 günden eski konuşma kayıtlarını siler.
+- **Her akşam 21:00:** `send_evening_summary()` → bugün tamamlanan görevler, kalanlar,
+  günün harcaması (iade sayısı dahil), yarının görevleri. `/aksam` ile elle çağrılır.
+- **Her pazar 20:00:** `send_weekly_report()` → tamamlanan görev sayısı, haftalık harcama,
+  geçen haftayla kıyas, günlük dağılım (metin çubuğu), kategori kırılımı. `/hafta` ile elle çağrılır.
 - **Her gece 04:00:** `nightly_backup()` → `backup.py` SQLite backup API ile tutarlı kopya alır,
   gzip'ler, Telegram'a dosya olarak gönderir. `/yedek` komutuyla elle de tetiklenir.
   Sunucu tamamen kaybolsa bile yedek Telegram sohbetinde durur.
@@ -265,6 +279,8 @@ TELEGRAM_CHAT_ID         → Yetkili kullanıcı chat ID (güvenlik için zorunl
 TELEGRAM_WEBHOOK_SECRET  → Webhook imza doğrulaması (boşsa devre dışı)
 GROQ_API_KEY             → Groq API key (LLM + Whisper + Vision)
 GROQ_MODEL               → Metin/komut modeli (varsayılan: llama-3.3-70b-versatile)
+GROQ_FALLBACK_MODEL      → Ana model hata verirse düşülecek model (varsayılan: llama-3.1-8b-instant)
+LOG_LEVEL                → DEBUG|INFO|WARNING|ERROR (varsayılan: INFO)
 GROQ_WHISPER_MODEL       → Ses transkripsiyon modeli (varsayılan: whisper-large-v3)
 GROQ_VISION_MODEL        → Görsel analiz modeli (varsayılan: qwen/qwen3.6-27b)
 API_KEY                  → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal)

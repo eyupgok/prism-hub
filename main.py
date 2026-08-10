@@ -1,11 +1,16 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from logging_setup import get_logger, setup_logging
+
+setup_logging()
+log = get_logger("prism.main")
 
 from auth import verify_api_key
 from database import init_db
@@ -26,15 +31,15 @@ async def lifespan(app: FastAPI):
     start_scheduler()
 
     if not os.getenv("API_KEY", ""):
-        print("⚠️  API_KEY ayarlanmamış — REST API doğrulaması DEVRE DIŞI (sadece lokal geliştirme için uygundur)")
+        log.warning("API_KEY ayarlanmamış — REST API doğrulaması DEVRE DIŞI (sadece lokal geliştirme için uygundur)")
     elif not os.getenv("PANEL_PASSWORD", ""):
-        print("⚠️  PANEL_PASSWORD ayarlanmamış — web paneline giriş yapılamaz (API_KEY ile REST erişimi çalışmaya devam eder)")
+        log.warning("PANEL_PASSWORD ayarlanmamış — web paneline giriş yapılamaz (API_KEY ile REST erişimi çalışır)")
 
     webhook_url = os.getenv("WEBHOOK_URL", "").rstrip("/")
     if webhook_url:
         await set_webhook(f"{webhook_url}/webhook")
     else:
-        print("⚠️  WEBHOOK_URL ayarlanmamış — Telegram webhook kurulmadı")
+        log.warning("WEBHOOK_URL ayarlanmamış — Telegram webhook kurulmadı")
 
     yield
 
@@ -76,5 +81,34 @@ app.include_router(summary_router, dependencies=protected)
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok", "service": "PRISM"}
+async def health(response: Response):
+    """Dışarıdan izleme için sağlık kontrolü.
+
+    Sadece "ayaktayım" demek yetmiyor: veritabanı okunamıyorsa ya da zamanlayıcı
+    durmuşsa servis çalışıyor görünür ama işe yaramaz. İzleme servisi bunu
+    fark edebilsin diye ikisi de kontrol ediliyor ve bozuksa 503 dönüyor.
+    """
+    checks = {"database": "ok", "scheduler": "ok"}
+
+    try:
+        from database import get_db
+
+        with get_db() as conn:
+            conn.execute("SELECT 1 FROM reminders LIMIT 1").fetchone()
+    except Exception as e:
+        checks["database"] = f"hata: {type(e).__name__}"
+        log.error("Sağlık kontrolü — veritabanı okunamadı", exc_info=True)
+
+    try:
+        from scheduler import scheduler
+
+        if not scheduler.running:
+            checks["scheduler"] = "durmuş"
+    except Exception as e:
+        checks["scheduler"] = f"hata: {type(e).__name__}"
+
+    healthy = all(v == "ok" for v in checks.values())
+    if not healthy:
+        response.status_code = 503
+
+    return {"status": "ok" if healthy else "degraded", "service": "PRISM", "checks": checks}

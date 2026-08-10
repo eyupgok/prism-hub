@@ -6,6 +6,10 @@ from typing import List, Dict
 
 import pytz
 
+from logging_setup import get_logger
+
+log = get_logger("prism.database")
+
 DB_PATH = os.getenv("DATABASE_PATH", "prism.db")
 _TZ = pytz.timezone("Europe/Istanbul")
 
@@ -85,4 +89,4 @@ def init_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_chat ON conversations(chat_id)")
 
-    print("✅ Veritabanı başlatıldı")
+    log.info("✅ Veritabanı başlatıldı")
