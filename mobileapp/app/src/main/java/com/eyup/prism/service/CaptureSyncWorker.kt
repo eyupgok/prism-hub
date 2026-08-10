@@ -10,6 +10,8 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.eyup.prism.data.CaptureLog
+import com.eyup.prism.data.Outcome
 import com.eyup.prism.data.PendingQueue
 import com.eyup.prism.data.QueuedItem
 import com.eyup.prism.data.SettingsStore
@@ -54,6 +56,12 @@ class CaptureSyncWorker(
             try {
                 val result = ApiClient.api().ingestNotification(item.ingest)
                 Log.i(TAG, "${item.ingest.packageName} → kaydedildi=${result.recorded}")
+                CaptureLog.add(
+                    ctx,
+                    item.ingest.packageName,
+                    if (result.recorded) Outcome.SAVED else Outcome.SKIPPED,
+                    result.expense?.let { "${it.amount} ₺ · ${it.category}" } ?: result.reason,
+                )
                 done += item
             } catch (e: IOException) {
                 // Ağ yok / kesildi — kalanları bir dahaki sefere bırak
@@ -66,6 +74,7 @@ class CaptureSyncWorker(
                 }
                 // 400/422 gibi hatalar tekrar denemekle düzelmez — kuyruğu tıkamasın
                 Log.w(TAG, "Kalıcı hata (HTTP ${e.code()}), kayıt atılıyor")
+                CaptureLog.add(ctx, item.ingest.packageName, Outcome.ERROR, "Sunucu HTTP ${e.code()}")
                 done += item
             } catch (e: Exception) {
                 Log.w(TAG, "Beklenmeyen hata: ${e.javaClass.simpleName}, kayıt atılıyor")

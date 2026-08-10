@@ -8,6 +8,8 @@ import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.eyup.prism.data.CaptureLog
+import com.eyup.prism.data.Outcome
 import com.eyup.prism.data.PendingQueue
 import com.eyup.prism.data.SettingsStore
 import com.eyup.prism.data.api.ApiClient
@@ -96,20 +98,30 @@ class ExpenseNotificationListener : NotificationListenerService() {
         ).maxByOrNull { it.length }.orEmpty().trim()
 
         if (body.isEmpty()) return
-        if (looksLikeSecret(body) || looksLikeSecret(title)) {
-            Log.d(TAG, "Şifre mesajı atlandı ($packageName)")
-            return
-        }
 
         val postedAt = isoFromMillis(sbn.postTime)
+        val isSecret = looksLikeSecret(body) || looksLikeSecret(title)
 
         scope.launch {
             try {
                 val settings = store.settings.first()
                 if (!settings.captureEnabled) return@launch
-                if (packageName !in settings.watchedPackages) return@launch
+
+                if (packageName !in settings.watchedPackages) {
+                    CaptureLog.add(applicationContext, packageName, Outcome.IGNORED, "Dinlenmiyor")
+                    return@launch
+                }
+
+                // Şifre/doğrulama mesajları telefondan hiç çıkmaz
+                if (isSecret) {
+                    Log.d(TAG, "Şifre mesajı atlandı ($packageName)")
+                    CaptureLog.add(applicationContext, packageName, Outcome.SECRET, "Şifre mesajı")
+                    return@launch
+                }
+
                 if (!settings.isConfigured) {
                     Log.w(TAG, "Sunucu ayarlı değil, bildirim gönderilemedi")
+                    CaptureLog.add(applicationContext, packageName, Outcome.ERROR, "Sunucu ayarlı değil")
                     return@launch
                 }
 
@@ -130,15 +142,23 @@ class ExpenseNotificationListener : NotificationListenerService() {
                     ApiClient.configure(settings.baseUrl, settings.apiKey)
                     val result = ApiClient.api().ingestNotification(ingest)
                     Log.i(TAG, "$packageName → kaydedildi=${result.recorded} (${result.reason})")
+                    CaptureLog.add(
+                        applicationContext,
+                        packageName,
+                        if (result.recorded) Outcome.SAVED else Outcome.SKIPPED,
+                        result.expense?.let { "${it.amount} ₺ · ${it.category}" } ?: result.reason,
+                    )
                 } catch (e: Exception) {
                     // Ağ yoksa veya sunucu ulaşılamazsa kaybetme — kuyruğa al, sonra gönder.
                     // postedAt bildirimle birlikte saklandığı için harcama doğru zamana yazılır.
                     Log.w(TAG, "Gönderilemedi ($packageName): ${e.javaClass.simpleName} → kuyruğa alındı")
                     PendingQueue.add(applicationContext, ingest)
                     CaptureSyncWorker.schedule(applicationContext)
+                    CaptureLog.add(applicationContext, packageName, Outcome.QUEUED, "Gönderilemedi, kuyrukta")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Bildirim işlenemedi ($packageName): ${e.javaClass.simpleName}")
+                CaptureLog.add(applicationContext, packageName, Outcome.ERROR, e.javaClass.simpleName)
             }
         }
     }

@@ -28,11 +28,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.SimpleDateFormat
+import java.util.Date
+import com.eyup.prism.data.CaptureLog
+import com.eyup.prism.data.CaptureLogEntry
 import com.eyup.prism.data.InstalledApp
+import com.eyup.prism.data.Outcome
 import com.eyup.prism.data.PendingQueue
 import com.eyup.prism.data.PrismSettings
 import com.eyup.prism.data.SettingsStore
@@ -67,9 +73,12 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
     var apps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     var search by remember { mutableStateOf("") }
     var pending by remember { mutableIntStateOf(0) }
+    var logEntries by remember { mutableStateOf<List<CaptureLogEntry>>(emptyList()) }
 
+    // Ekran her açıldığında tazelenir; arka planda eklenen kayıtlar için "Yenile" var
     LaunchedEffect(settings.captureEnabled) {
         pending = PendingQueue.size(context)
+        logEntries = CaptureLog.read(context).reversed()
     }
 
     // Sistem ayarlarından dönünce izin durumunu tazele
@@ -204,6 +213,80 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
                     fontSize = 12.sp,
                 )
             }
+
+            CaptureLogList(
+                entries = logEntries,
+                onRefresh = { logEntries = CaptureLog.read(context).reversed() },
+                onClear = {
+                    CaptureLog.clear(context)
+                    logEntries = emptyList()
+                },
+            )
+        }
+    }
+}
+
+/** Sonuç koduna göre etiket ve renk */
+private fun outcomeLabel(outcome: String): Pair<String, Color> = when (outcome) {
+    Outcome.SAVED -> "kaydedildi" to PrismGreen
+    Outcome.SKIPPED -> "harcama değil" to PrismTextMuted
+    Outcome.QUEUED -> "kuyrukta" to PrismPurpleLight
+    Outcome.IGNORED -> "dinlenmiyor" to PrismTextFaint
+    Outcome.SECRET -> "şifre mesajı" to PrismTextFaint
+    else -> "hata" to PrismRed
+}
+
+@Composable
+private fun CaptureLogList(
+    entries: List<CaptureLogEntry>,
+    onRefresh: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale("tr")) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Son Yakalananlar", color = PrismText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Row {
+            TextButton(onClick = onRefresh) { Text("Yenile", color = PrismPurpleLight) }
+            if (entries.isNotEmpty()) {
+                TextButton(onClick = onClear) { Text("Temizle", color = PrismTextMuted) }
+            }
+        }
+    }
+
+    if (entries.isEmpty()) {
+        Text(
+            "Henüz bildirim yakalanmadı. Bir bildirim geldiğinde burada görünecek — " +
+                "yakalanmadıysa sebebi de yazar.",
+            color = PrismTextFaint,
+            fontSize = 12.sp,
+        )
+        return
+    }
+
+    entries.take(20).forEach { entry ->
+        val (label, color) = outcomeLabel(entry.outcome)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(entry.appLabel, color = PrismText, fontSize = 13.sp)
+                if (entry.detail.isNotBlank()) {
+                    Text(entry.detail, color = PrismTextFaint, fontSize = 11.sp)
+                }
+            }
+            Text(
+                timeFormat.format(Date(entry.at)),
+                color = PrismTextFaint,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(end = 8.dp),
+            )
+            Text(label, color = color, fontSize = 11.sp)
         }
     }
 }

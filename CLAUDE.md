@@ -78,6 +78,8 @@ mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
   data/SettingsStore.kt      → sunucu URL + API anahtarı + yakalama ayarları (DataStore)
   data/InstalledApps.kt      → kurulu uygulama listesi (banka olanlar başta sıralanır)
   data/PendingQueue.kt       → çevrimdışıyken biriken bildirimler (JSON dosya, filesDir)
+  data/CaptureLog.kt         → son 40 bildirimin SONUCU (metin değil) — Ayarlar'da
+                               "Son Yakalananlar" listesi; Logcat'siz teşhis için
   data/api/                  → Retrofit client (X-API-Key interceptor), modeller
   service/ExpenseNotificationListener.kt
                              → banka bildirimlerini yakalar → /api/expenses/ingest
