@@ -105,9 +105,8 @@ async def get_evening_summary() -> str:
         completed = reminder_svc.count_completed_between(conn, today_start, tomorrow_start)
         remaining = reminder_svc.list_due_between(conn, today_start, tomorrow_start)
         tomorrow = reminder_svc.list_due_between(conn, tomorrow_start, day_after)
-        todays_expenses = [
-            e for e in expenses_svc.list_expenses(conn) if e["expense_date"] == today_str
-        ]
+        todays_expenses = expenses_svc.list_expenses(conn, since=today_str, until=None, month=today_str[:7])
+        todays_expenses = [e for e in todays_expenses if e["expense_date"] == today_str]
 
     spent = sum(e["amount"] for e in todays_expenses)
 
@@ -159,7 +158,12 @@ async def get_weekly_report() -> str:
     with get_db() as conn:
         completed = reminder_svc.count_completed_between(conn, week_start, tomorrow_start)
         prev_completed = reminder_svc.count_completed_between(conn, prev_week_start, week_start)
-        all_expenses = expenses_svc.list_expenses(conn)
+        # Sadece iki haftalık aralık çekiliyor — tüm geçmişi okumaya gerek yok
+        all_expenses = expenses_svc.list_expenses(
+            conn,
+            since=prev_week_start.strftime("%Y-%m-%d"),
+            until=tomorrow_start.strftime("%Y-%m-%d"),
+        )
 
     def total_between(start: datetime, end: datetime) -> float:
         return sum(

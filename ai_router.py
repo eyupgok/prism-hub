@@ -304,8 +304,13 @@ async def _handle_reminders(action: str, params: Dict) -> str:
             return f"✅ '{_esc(r['title'])}' tamamlandı!"
 
         if action == "delete":
-            ok = svc.delete_reminder(conn, params.get("id"))
-            return "🗑 Hatırlatıcı silindi." if ok else "❌ Hatırlatıcı bulunamadı."
+            r = svc.get_reminder_by_id(conn, params.get("id"))
+            if not r:
+                return "❌ Hatırlatıcı bulunamadı."
+            due = svc.parse_dt(r["due_datetime"])
+            return await _ask_delete_confirmation(
+                "reminder", r["id"], f"📌 {_esc(r['title'])} — {svc.format_dt(due)}"
+            )
 
     return f"❓ Bilinmeyen aksiyon: {action}"
 
@@ -356,10 +361,35 @@ async def _handle_notes(action: str, params: Dict) -> str:
             return f"✏️ Not güncellendi!\n📌 {_esc(n['title'])}\n🏷 {n['category']}"
 
         if action == "delete":
-            ok = svc.delete_note(conn, params.get("id"))
-            return "🗑 Not silindi." if ok else "❌ Not bulunamadı."
+            n = svc.get_note_by_id(conn, params.get("id"))
+            if not n:
+                return "❌ Not bulunamadı."
+            return await _ask_delete_confirmation(
+                "note", n["id"], f"📝 {_esc(n['title'])} ({n['category']})"
+            )
 
     return f"❓ Bilinmeyen aksiyon: {action}"
+
+
+async def _ask_delete_confirmation(kind: str, item_id: int, label: str) -> str:
+    """Silmeyi hemen yapmaz; Telegram'a onay butonu gönderir.
+
+    AI mesajı yanlış anlayıp yanlış kaydı silebilir ve silinen geri gelmez.
+    Ne silineceğini göstermek, iki dokunuşa değer.
+    """
+    import confirm
+    from telegram_bot import send_message
+
+    token = confirm.remember({"kind": kind, "id": item_id})
+
+    await send_message(
+        f"🗑 <b>Silinecek</b>\n{label}\n\n<i>Onaylıyor musun?</i>",
+        reply_markup={"inline_keyboard": [[
+            {"text": "🗑 Evet, sil", "callback_data": f"delok_{token}"},
+            {"text": "Vazgeç", "callback_data": f"delno_{token}"},
+        ]]},
+    )
+    return "🗑 Silmeden önce onayını bekliyorum 👇"
 
 
 def _receipt_moment(params: Dict) -> Optional[str]:
@@ -482,8 +512,13 @@ async def _handle_expenses(action: str, params: Dict) -> str:
             return "\n".join(lines)
 
         if action == "delete":
-            ok = svc.delete_expense(conn, params.get("id"))
-            return "🗑 Harcama silindi." if ok else "❌ Harcama bulunamadı."
+            e = svc.get_expense_by_id(conn, params.get("id"))
+            if not e:
+                return "❌ Harcama bulunamadı."
+            return await _ask_delete_confirmation(
+                "expense", e["id"],
+                f"💵 {abs(e['amount']):.2f} TL — {e['category']} · {_esc(e['description']) or '—'} ({e['expense_date']})",
+            )
 
     return f"❓ Bilinmeyen aksiyon: {action}"
 

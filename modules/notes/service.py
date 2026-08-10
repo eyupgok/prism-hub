@@ -26,15 +26,22 @@ def get_note_by_id(conn: sqlite3.Connection, note_id: int) -> Optional[Dict[str,
     return dict(row) if row else None
 
 
-def list_notes(conn: sqlite3.Connection, category: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_notes(
+    conn: sqlite3.Connection,
+    category: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    query = "SELECT * FROM notes"
+    params: list = []
     if category:
-        rows = conn.execute(
-            "SELECT * FROM notes WHERE category = ? ORDER BY created_at DESC",
-            (category,),
-        ).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM notes ORDER BY created_at DESC").fetchall()
-    return [dict(r) for r in rows]
+        query += " WHERE category = ?"
+        params.append(category)
+    query += " ORDER BY created_at DESC"
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        params.extend([limit, max(0, offset)])
+    return [dict(r) for r in conn.execute(query, params).fetchall()]
 
 
 def search_notes(

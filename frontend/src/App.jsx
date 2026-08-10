@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Reminders from './pages/Reminders'
 import Notes from './pages/Notes'
 import Expenses from './pages/Expenses'
+import Budget from './pages/Budget'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
 import { api, UNAUTHORIZED_EVENT } from './api/client'
@@ -14,6 +15,7 @@ const PAGES = {
   reminders: Reminders,
   notes: Notes,
   expenses: Expenses,
+  budget: Budget,
   settings: Settings,
 }
 

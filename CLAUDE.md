@@ -26,6 +26,9 @@ logging_setup.py     → Tek yerden loglama. `print()` KULLANMA — `get_logger(
 groq_client.py       → Groq çağrıları için ortak sarmalayıcı: JSON modu
                        (response_format) + ana model başarısızsa GROQ_FALLBACK_MODEL
 backup.py            → SQLite backup API ile tutarlı kopya → gzip → Telegram'a dosya
+confirm.py           → Onay bekleyen yıkıcı işlemler (AI ile silme). Bellekte, 5 dk ömürlü.
+                       REST/panel silmeleri bu akıştan geçmez — orada kullanıcı zaten
+                       hangi satıra bastığını görüyor.
 auth.py              → İki yollu doğrulama: X-API-Key başlığı (Android) VEYA prism_session
                        çerezi (web paneli). Oturum bileti HMAC imzalı + son kullanma tarihli,
                        sunucuda saklanmaz. İmza anahtarı API_KEY'den türetilir — API_KEY
@@ -78,7 +81,10 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
                        .nav-item, .btn-primary, .input-field hep burada tanımlı.
                        Ortak yumuşatma eğrisi: var(--ease) = cubic-bezier(.16,1,.3,1)
   src/api/client.js  → fetch sarmalayıcı, X-API-Key header (VITE_API_KEY)
-  src/pages/         → Dashboard, Reminders, Notes, Expenses, Settings
+  src/pages/         → Dashboard, Reminders, Notes, Expenses, Budget, Settings, Login
+  src/components/ErrorBoundary.jsx
+                     → Render hatasında beyaz ekran yerine sebebi gösterir
+                       (React'te hata sınırı yalnızca sınıf bileşeniyle yazılabiliyor)
 
 mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
   data/SettingsStore.kt      → sunucu URL + API anahtarı + yakalama ayarları (DataStore)
@@ -177,6 +183,7 @@ Callback handler (`_handle_callback_query`): inline button data formatı:
 - `expset_{id}_{index}` → kategoriyi değiştir (index → `ingest.CATEGORY_ORDER`;
   callback data 64 bayt sınırlı olduğu için kategori adı değil sırası gönderilir)
 - `dupadd_{token}` → çift sanılıp elenen kaydı yine de ekle (token bellekte, 1 saat ömürlü)
+- `delok_{token}` / `delno_{token}` → AI ile istenen silmeyi onayla / vazgeç (`confirm.py`)
 
 ## Banka Bildiriminden Otomatik Harcama
 

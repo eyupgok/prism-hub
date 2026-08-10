@@ -36,9 +36,13 @@ def search_notes(
 
 
 @router.get("/")
-def list_notes(category: Optional[str] = None):
+def list_notes(
+    category: Optional[str] = None,
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+):
     with get_db() as conn:
-        return service.list_notes(conn, category)
+        return service.list_notes(conn, category, limit=limit, offset=offset)
 
 
 @router.get("/{note_id}")

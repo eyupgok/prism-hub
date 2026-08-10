@@ -1,4 +1,4 @@
-import { Home, Bell, FileText, DollarSign, Settings, Sparkles } from 'lucide-react'
+import { Home, Bell, FileText, DollarSign, Wallet, Settings, Sparkles } from 'lucide-react'
 
 // Tailwind sınıf adlarını kaynak dosyada birebir arar — `stagger-${i}` gibi
 // birleştirilmiş adları göremez ve o kuralları çıktıdan siler. O yüzden düz liste.
@@ -9,6 +9,7 @@ const NAV = [
   { id: 'reminders', label: 'Hatırlatıcılar', icon: Bell },
   { id: 'notes', label: 'Notlar', icon: FileText },
   { id: 'expenses', label: 'Harcamalar', icon: DollarSign },
+  { id: 'budget', label: 'Bütçe', icon: Wallet },
   { id: 'settings', label: 'Ayarlar', icon: Settings },
 ]
 

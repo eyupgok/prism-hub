@@ -401,6 +401,43 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
             else:
                 await answer_callback_query(cb_id, "❌ Bulunamadı")
 
+        # ── AI ile istenen silmenin onayı ────────────────────────────────────
+        elif data.startswith("delno_"):
+            import confirm
+
+            confirm.take(data.split("_", 1)[1])
+            await answer_callback_query(cb_id, "Vazgeçildi")
+            await edit_message(chat_id, message_id, "✅ <i>Vazgeçildi, hiçbir şey silinmedi.</i>")
+
+        elif data.startswith("delok_"):
+            import confirm
+            from modules.expenses import service as exp_svc
+            from modules.notes import service as note_svc
+
+            pending = confirm.take(data.split("_", 1)[1])
+            if pending is None:
+                await answer_callback_query(cb_id, "⌛ Onay süresi doldu")
+                await edit_message(
+                    chat_id, message_id,
+                    "⌛ <i>Onay süresi doldu, silme yapılmadı. Tekrar dener misin?</i>",
+                )
+            else:
+                deleters = {
+                    "reminder": (svc.delete_reminder, "Hatırlatıcı"),
+                    "note": (note_svc.delete_note, "Not"),
+                    "expense": (exp_svc.delete_expense, "Harcama"),
+                }
+                delete_fn, label = deleters[pending["kind"]]
+                with get_db() as conn:
+                    deleted = delete_fn(conn, pending["id"])
+
+                if deleted:
+                    await answer_callback_query(cb_id, "🗑 Silindi")
+                    await edit_message(chat_id, message_id, f"🗑 <i>{label} silindi.</i>")
+                else:
+                    await answer_callback_query(cb_id, "❌ Bulunamadı")
+                    await edit_message(chat_id, message_id, f"❌ <i>{label} bulunamadı.</i>")
+
         # ── Banka bildiriminden kaydedilen harcamayı düzeltme ────────────────
         elif data.startswith("expdel_"):
             from modules.expenses import service as exp_svc

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
@@ -34,9 +34,16 @@ def get_summary(month: Optional[str] = None):
 
 
 @router.get("/")
-def list_expenses(month: Optional[str] = None, category: Optional[str] = None):
+def list_expenses(
+    month: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+):
+    """Varsayılan 500 kayıtla sınırlı — yıllar geçtikçe panel her açılışta
+    tüm geçmişi indirmesin. Daha fazlası için offset ile sayfalayın."""
     with get_db() as conn:
-        return service.list_expenses(conn, month, category)
+        return service.list_expenses(conn, month, category, limit=limit, offset=offset)
 
 
 class NotificationIngest(BaseModel):

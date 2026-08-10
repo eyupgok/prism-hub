@@ -167,18 +167,39 @@ def list_expenses(
     conn: sqlite3.Connection,
     month: Optional[str] = None,
     category: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> List[Dict[str, Any]]:
+    """Harcamaları listeler.
+
+    `since`/`until` (YYYY-MM-DD, until hariç) ay sınırını aşan aralıklar için —
+    haftalık rapor iki aya yayılabiliyor ve tüm geçmişi çekmesi gereksiz.
+    `limit`/`offset` sayfalama için; varsayılan sınırsız çünkü özetler toplamı
+    doğru hesaplayabilmek için hepsine ihtiyaç duyuyor.
+    """
     query = "SELECT * FROM expenses WHERE 1=1"
     params: list = []
 
     if month:
         query += " AND expense_date LIKE ?"
         params.append(f"{month}%")
+    if since:
+        query += " AND expense_date >= ?"
+        params.append(since)
+    if until:
+        query += " AND expense_date < ?"
+        params.append(until)
     if category:
         query += " AND category = ?"
         params.append(category)
 
     query += " ORDER BY expense_date DESC, created_at DESC"
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        params.extend([limit, max(0, offset)])
+
     return [dict(r) for r in conn.execute(query, params).fetchall()]
 
 
