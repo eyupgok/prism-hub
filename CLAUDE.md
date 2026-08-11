@@ -265,6 +265,24 @@ güncellendikten sonra dinleyiciyi geri bağlamayabiliyor; ayar ekranı yeşil k
 bildirim gelmez. `requestListenerRebind()` bunun yazılımla yapılan karşılığı — açılışta
 (`MainActivity`) ve bağlantı koptuğunda (`onListenerDisconnected`) kendiliğinden çağrılır.
 
+**Bağlanmıyorsa `adb` ile kesin teşhis** (bir kez yaşandı, Redmi Note 13 / HyperOS):
+
+```bash
+adb logcat -d | grep -iE "MIUILOG- Reject service|Unable to bind notification"
+adb shell dumpsys notification | grep -A 14 "Live notification listeners"   # bağlıysa listede olur
+adb shell run-as com.eyup.prism cat shared_prefs/prism_listener_state.xml
+adb shell run-as com.eyup.prism cat files/capture_log.json
+adb shell cmd notification post -t "Test" testtag "metin"                   # dinleyici görüyor mu
+```
+
+İki tuzak vardı:
+1. Servis `exported="false"` idi (yukarıdaki manifest notu).
+2. **Xiaomi "Otomatik başlatma" izni** — kapalıyken MIUI'nin `AutoStartManagerService`'i
+   sistemin bağlanmasını reddediyor. İzni açmak tek başına yetmiyor: Android o noktada
+   pes etmiş oluyor, **uygulamayı tamamen kapatıp yeniden açmak** gerekiyor. Ayrıca pil
+   kısıtlaması ayrı bir mekanizma — "Kısıtlama yok" yapılmazsa servis birkaç saat sonra
+   yine ölür.
+
 Dinleyicinin sessizce elediği durumlar (kalıcı bildirim, grup başlığı, metin okunamadı)
 artık **seçili uygulamalar için** kayda düşüyor — eskiden hiçbir iz bırakmadan atlanıyordu.
 Metin çıkarımı da tek alana bakmıyor: `EXTRA_BIG_TEXT`, `EXTRA_TEXT`, `EXTRA_TEXT_LINES`
