@@ -48,10 +48,19 @@
         <!--
           Banka bildirimlerinden otomatik harcama kaydı.
           İzin uygulama içinden istenemez; kullanıcı Ayarlar > Bildirim erişimi'nden verir.
+
+          ⚠️ exported="true" ŞART ve kasıtlı. Bu servise bağlanan sistemin kendisi
+          (system_server), yani uygulamanın dışından bir süreç — exported="false"
+          olduğunda bağlantı sessizce reddediliyor:
+            W NotificationListeners: Unable to bind notification listener service
+          İzin verilmiş görünür, ayar ekranında işaretli durur, ama hiçbir bildirim gelmez.
+          Dışarıya açmanın riski yok: android:permission ile korunuyor ve
+          BIND_NOTIFICATION_LISTENER_SERVICE yalnızca sistemde bulunur, başka
+          uygulama bu servise bağlanamaz.
         -->
         <service
             android:name=".service.ExpenseNotificationListener"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>

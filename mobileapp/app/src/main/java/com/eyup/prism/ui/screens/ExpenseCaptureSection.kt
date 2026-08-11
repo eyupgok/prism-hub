@@ -203,10 +203,19 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
                         )
                     },
                     onRebind = {
+                        testNote = "Yeniden bağlanma istendi..."
                         requestListenerRebind(context)
                         scope.launch {
-                            delay(1200)
+                            delay(1500)
                             refresh()
+                            testNote = if (listener.connected) {
+                                "✅ Dinleyici bağlandı."
+                            } else {
+                                "❌ Sistem bağlantıyı reddetti. Xiaomi/Redmi/Poco " +
+                                    "telefonlarda sebebi genelde \"Otomatik başlatma\" " +
+                                    "iznidir: Ayarlar → Uygulamalar → PRISM → Otomatik " +
+                                    "başlatma'yı aç, sonra tekrar dene."
+                            }
                         }
                     },
                 )
@@ -328,8 +337,10 @@ private fun ListenerStatusBlock(
 
         if (!status.connected) {
             Text(
-                "İzin verilmiş görünse bile servis bağlanmamış olabilir — uygulama " +
-                    "güncellendikten sonra sık olur. Önce \"Yeniden bağla\"yı dene.",
+                "İzin verilmiş görünse bile servis bağlanmamış olabilir. İki sık sebep: " +
+                    "uygulama güncellendikten sonra sistem servisi geri bağlamaz, ya da " +
+                    "telefonun \"Otomatik başlatma\" izni kapalıdır (Xiaomi/Redmi/Poco'da " +
+                    "varsayılan kapalıdır ve bağlantıyı sessizce reddeder).",
                 color = PrismTextFaint,
                 fontSize = 11.sp,
             )
