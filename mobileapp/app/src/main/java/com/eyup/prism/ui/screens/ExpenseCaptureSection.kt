@@ -38,14 +38,19 @@ import java.util.Date
 import com.eyup.prism.data.CaptureLog
 import com.eyup.prism.data.CaptureLogEntry
 import com.eyup.prism.data.InstalledApp
+import com.eyup.prism.data.ListenerState
 import com.eyup.prism.data.Outcome
 import com.eyup.prism.data.PendingQueue
 import com.eyup.prism.data.PrismSettings
 import com.eyup.prism.data.SettingsStore
 import com.eyup.prism.data.loadInstalledApps
 import com.eyup.prism.service.CaptureSyncWorker
+import com.eyup.prism.service.canPostNotifications
 import com.eyup.prism.service.hasNotificationAccess
 import com.eyup.prism.service.notificationAccessIntent
+import com.eyup.prism.service.requestListenerRebind
+import com.eyup.prism.service.sendSelfTestNotification
+import kotlinx.coroutines.delay
 import com.eyup.prism.ui.theme.PrismGreen
 import com.eyup.prism.ui.theme.PrismPurple
 import com.eyup.prism.ui.theme.PrismPurpleLight
@@ -74,17 +79,50 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
     var search by remember { mutableStateOf("") }
     var pending by remember { mutableIntStateOf(0) }
     var logEntries by remember { mutableStateOf<List<CaptureLogEntry>>(emptyList()) }
+    var listener by remember { mutableStateOf(ListenerState.read(context)) }
+    var testNote by remember { mutableStateOf<String?>(null) }
 
-    // Ekran her açıldığında tazelenir; arka planda eklenen kayıtlar için "Yenile" var
-    LaunchedEffect(settings.captureEnabled) {
+    fun refresh() {
         pending = PendingQueue.size(context)
         logEntries = CaptureLog.read(context).reversed()
+        listener = ListenerState.read(context)
     }
+
+    // Ekran her açıldığında tazelenir; arka planda eklenen kayıtlar için "Yenile" var
+    LaunchedEffect(settings.captureEnabled) { refresh() }
 
     // Sistem ayarlarından dönünce izin durumunu tazele
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { hasAccess = hasNotificationAccess(context) }
+    ) {
+        hasAccess = hasNotificationAccess(context)
+        // İzin yeni verildiyse servis hemen bağlanmayabiliyor
+        if (hasAccess) requestListenerRebind(context)
+    }
+
+    /** Test bildirimini gönderip sonucun kayda düşmesini bekler */
+    fun runSelfTest() {
+        testNote = "Test bildirimi gönderildi, sonuç bekleniyor..."
+        scope.launch {
+            sendSelfTestNotification(context)
+            delay(1500)
+            refresh()
+            testNote = if (logEntries.any { it.outcome == Outcome.SELF_TEST }) {
+                "✅ Dinleyici bildirimi gördü — yakalama zinciri çalışıyor."
+            } else {
+                "❌ Dinleyici test bildirimini görmedi. Aşağıdaki \"Yeniden bağla\"yı " +
+                    "dene; düzelmezse sistem ayarlarından bildirim erişimini kapatıp aç."
+            }
+        }
+    }
+
+    // Android 13+ bildirim göndermek için izin istiyor — test düğmesi bunu gerektiriyor
+    val postPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) runSelfTest()
+        else testNote = "Test için bildirim gönderme izni gerekiyor."
+    }
 
     LaunchedEffect(showPicker) {
         if (showPicker && apps.isEmpty()) apps = loadInstalledApps(context)
@@ -148,6 +186,29 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
                         "biraz farklı görünebilir.",
                     color = PrismTextFaint,
                     fontSize = 11.sp,
+                )
+            }
+
+            // ── Dinleyici gerçekten çalışıyor mu ─────────────────────────────
+            // İzin verilmiş görünmesi yetmiyor: servis bağlı olmayabilir ya da bağlı
+            // olup hiçbir bildirim görmüyor olabilir. İkisi ayrı sinyal, ayrı gösteriliyor.
+            if (hasAccess) {
+                ListenerStatusBlock(
+                    status = listener,
+                    testNote = testNote,
+                    onTest = {
+                        if (canPostNotifications(context)) runSelfTest()
+                        else postPermissionLauncher.launch(
+                            android.Manifest.permission.POST_NOTIFICATIONS
+                        )
+                    },
+                    onRebind = {
+                        requestListenerRebind(context)
+                        scope.launch {
+                            delay(1200)
+                            refresh()
+                        }
+                    },
                 )
             }
 
@@ -216,12 +277,75 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
 
             CaptureLogList(
                 entries = logEntries,
-                onRefresh = { logEntries = CaptureLog.read(context).reversed() },
+                onRefresh = { refresh() },
                 onClear = {
                     CaptureLog.clear(context)
                     logEntries = emptyList()
                 },
             )
+        }
+    }
+}
+
+/**
+ * Dinleyicinin canlılık kartı.
+ *
+ * "Son gördüğü bildirim" satırı teşhisin belkemiği: burası boşsa sorun banka
+ * uygulamasında ya da paket seçiminde değil, dinleyicinin kendisindedir — çünkü
+ * seçili olmayan uygulamaların bildirimleri de "dinlenmiyor" olarak kayda geçiyor.
+ */
+@Composable
+private fun ListenerStatusBlock(
+    status: ListenerState.Status,
+    testNote: String?,
+    onTest: () -> Unit,
+    onRebind: () -> Unit,
+) {
+    val timeFormat = remember { SimpleDateFormat("d MMM HH:mm", Locale("tr")) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x14FFFFFF), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            if (status.connected) "🟢 Dinleyici bağlı" else "🔴 Dinleyici bağlı değil",
+            color = if (status.connected) PrismGreen else PrismRed,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            if (status.lastSeenAt == 0L) {
+                "Henüz hiçbir bildirim görmedi — hangi uygulamadan olursa olsun."
+            } else {
+                "Son gördüğü bildirim: ${timeFormat.format(Date(status.lastSeenAt))}"
+            },
+            color = PrismTextFaint,
+            fontSize = 11.sp,
+        )
+
+        if (!status.connected) {
+            Text(
+                "İzin verilmiş görünse bile servis bağlanmamış olabilir — uygulama " +
+                    "güncellendikten sonra sık olur. Önce \"Yeniden bağla\"yı dene.",
+                color = PrismTextFaint,
+                fontSize = 11.sp,
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onTest) {
+                Text("Test bildirimi gönder", color = PrismPurpleLight, fontSize = 13.sp)
+            }
+            TextButton(onClick = onRebind) {
+                Text("Yeniden bağla", color = PrismTextMuted, fontSize = 13.sp)
+            }
+        }
+
+        if (testNote != null) {
+            Text(testNote, color = PrismTextMuted, fontSize = 12.sp)
         }
     }
 }
@@ -233,6 +357,7 @@ private fun outcomeLabel(outcome: String): Pair<String, Color> = when (outcome) 
     Outcome.QUEUED -> "kuyrukta" to PrismPurpleLight
     Outcome.IGNORED -> "dinlenmiyor" to PrismTextFaint
     Outcome.SECRET -> "şifre mesajı" to PrismTextFaint
+    Outcome.SELF_TEST -> "test ✅" to PrismGreen
     else -> "hata" to PrismRed
 }
 

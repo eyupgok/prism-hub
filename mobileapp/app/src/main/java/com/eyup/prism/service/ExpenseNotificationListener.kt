@@ -9,6 +9,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.eyup.prism.data.CaptureLog
+import com.eyup.prism.data.ListenerState
 import com.eyup.prism.data.Outcome
 import com.eyup.prism.data.PendingQueue
 import com.eyup.prism.data.SettingsStore
@@ -72,7 +73,15 @@ class ExpenseNotificationListener : NotificationListenerService() {
     private val recentKeys = Collections.synchronizedSet(LinkedHashSet<String>())
 
     override fun onListenerConnected() {
+        ListenerState.markConnected(applicationContext)
         Log.i(TAG, "Bildirim dinleyici bağlandı")
+    }
+
+    override fun onListenerDisconnected() {
+        ListenerState.markDisconnected(applicationContext)
+        Log.w(TAG, "Bildirim dinleyici koptu — yeniden bağlanma isteniyor")
+        // Sistem servisi kapattığında kendiliğinden geri gelmeyebiliyor; kendimiz isteyelim.
+        requestListenerRebind(applicationContext)
     }
 
     override fun onDestroy() {
@@ -84,20 +93,22 @@ class ExpenseNotificationListener : NotificationListenerService() {
         val notification = sbn?.notification ?: return
         val packageName = sbn.packageName ?: return
 
-        if (packageName == applicationContext.packageName) return
-        if (sbn.isOngoing) return
-        // Grup başlığı bildirimleri ("3 yeni mesaj") içerik taşımaz
-        if (notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        // Dinleyicinin nabzı: hangi uygulamadan geldiği önemli değil, bir şey GÖRÜYOR
+        // olması önemli. Teşhiste ilk bakılacak yer burası.
+        ListenerState.markSaw(applicationContext)
 
-        val extras = notification.extras ?: return
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().trim()
-        // Uzun metin varsa onu tercih et — kısaltılmış hâlinde tutar eksik kalabiliyor
-        val body = listOfNotNull(
-            extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString(),
-            extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
-        ).maxByOrNull { it.length }.orEmpty().trim()
+        val isSelfTest = packageName == applicationContext.packageName && sbn.tag == SELF_TEST_TAG
+        if (packageName == applicationContext.packageName && !isSelfTest) return
 
-        if (body.isEmpty()) return
+        val title = notification.extras
+            ?.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().trim()
+        val body = extractText(notification)
+
+        // Bu iki eleme eskiden burada sessizce yapılıyordu. Artık aşağıya taşındı:
+        // SEÇİLİ bir uygulamanın bildirimi elenirse sebebi kayda düşsün, yoksa
+        // "bildirim geldi ama hiçbir şey olmadı" durumunun izahı kalmıyor.
+        val isOngoing = sbn.isOngoing
+        val isGroupSummary = notification.flags and Notification.FLAG_GROUP_SUMMARY != 0
 
         val postedAt = isoFromMillis(sbn.postTime)
         val isSecret = looksLikeSecret(body) || looksLikeSecret(title)
@@ -107,8 +118,38 @@ class ExpenseNotificationListener : NotificationListenerService() {
                 val settings = store.settings.first()
                 if (!settings.captureEnabled) return@launch
 
+                if (isSelfTest) {
+                    CaptureLog.add(
+                        applicationContext,
+                        packageName,
+                        Outcome.SELF_TEST,
+                        "Dinleyici bildirimi gördü — yakalama çalışıyor",
+                    )
+                    return@launch
+                }
+
                 if (packageName !in settings.watchedPackages) {
                     CaptureLog.add(applicationContext, packageName, Outcome.IGNORED, "Dinlenmiyor")
+                    return@launch
+                }
+
+                if (isOngoing || isGroupSummary) {
+                    CaptureLog.add(
+                        applicationContext,
+                        packageName,
+                        Outcome.SKIPPED,
+                        if (isOngoing) "Kalıcı bildirim, atlandı" else "Grup başlığı, atlandı",
+                    )
+                    return@launch
+                }
+
+                if (body.isEmpty()) {
+                    CaptureLog.add(
+                        applicationContext,
+                        packageName,
+                        Outcome.ERROR,
+                        "Bildirim metni okunamadı",
+                    )
                     return@launch
                 }
 
@@ -161,6 +202,30 @@ class ExpenseNotificationListener : NotificationListenerService() {
                 CaptureLog.add(applicationContext, packageName, Outcome.ERROR, e.javaClass.simpleName)
             }
         }
+    }
+
+    /**
+     * Bildirim metnini çıkarır.
+     *
+     * Tek bir alana güvenilemiyor: kısaltılmış `EXTRA_TEXT`te tutar eksik kalabiliyor,
+     * bazı bankalar metni satır listesi (InboxStyle) olarak koyuyor. Hepsini toplayıp
+     * en uzun olanı seçmek pratikte en doğru sonucu veriyor.
+     */
+    private fun extractText(notification: Notification): String {
+        val extras = notification.extras ?: return ""
+        val candidates = mutableListOf<String?>(
+            extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString(),
+            extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
+            extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+                ?.joinToString("\n") { it.toString() },
+            extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString(),
+            notification.tickerText?.toString(),
+        )
+        return candidates
+            .mapNotNull { it?.trim() }
+            .filter { it.isNotEmpty() }
+            .maxByOrNull { it.length }
+            .orEmpty()
     }
 
     private fun trimRecentKeys() {

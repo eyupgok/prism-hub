@@ -29,6 +29,7 @@ object Outcome {
     const val QUEUED = "queued"      // gönderilemedi, kuyruğa alındı
     const val IGNORED = "ignored"    // bu uygulama dinlenmiyor
     const val SECRET = "secret"      // şifre/doğrulama mesajı, telefondan hiç çıkmadı
+    const val SELF_TEST = "self_test" // "Test bildirimi gönder" düğmesinin bildirimi
     const val ERROR = "error"
 }
 

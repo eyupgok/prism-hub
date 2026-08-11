@@ -103,13 +103,18 @@ mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
   data/PendingQueue.kt       → çevrimdışıyken biriken bildirimler (JSON dosya, filesDir)
   data/CaptureLog.kt         → son 40 bildirimin SONUCU (metin değil) — Ayarlar'da
                                "Son Yakalananlar" listesi; Logcat'siz teşhis için
+  data/ListenerState.kt      → dinleyicinin canlılık kaydı: bağlı mı + EN SON ne zaman
+                               herhangi bir bildirim gördü (SharedPreferences)
   data/api/                  → Retrofit client (X-API-Key interceptor), modeller
   service/ExpenseNotificationListener.kt
                              → banka bildirimlerini yakalar → /api/expenses/ingest
+  service/CaptureSelfTest.kt → "Test bildirimi gönder" (uygulama kendine bildirim atar,
+                               dinleyici görürse zincir sağlam) + requestListenerRebind()
   service/CaptureSyncWorker.kt
                              → WorkManager: internet gelince kuyruğu boşaltır
   ui/screens/                → Chat, Reminders, Notes, Expenses, Settings
-                               (+ ExpenseCaptureSection: izin + uygulama seçici)
+                               (+ ExpenseCaptureSection: izin + uygulama seçici +
+                                dinleyici durum kartı)
   MainActivity.kt            → alt gezinme + sekme yönetimi
 ```
 
@@ -241,6 +246,29 @@ geçici olanlarda (401/403/429/5xx) tekrar denenir.
 
 **Harcama değilse** (bakiye, iade, kampanya, şifre) endpoint 200 + `recorded: false` döner —
 telefon bunu hata saymaz, tekrar denemez.
+
+### "Bildirim geldi ama hiçbir şey olmadı" — teşhis sırası
+
+Ayarlar → Otomatik Harcama Yakalama'daki durum kartı sırayla şunu söyler:
+
+1. **"Son gördüğü bildirim" boşsa** → sorun banka uygulamasında ya da paket seçiminde
+   DEĞİL. Dinleyici hiçbir şey almıyor demektir, çünkü seçili olmayan uygulamaların
+   bildirimleri de "dinlenmiyor" olarak kayda geçiyor. **Test bildirimi gönder** →
+   görülmezse **Yeniden bağla** → olmazsa sistem ayarlarından bildirim erişimini kapat-aç.
+2. **Dinleyici görüyor ama banka satırı yoksa** → uygulamanın paketi seçili değil.
+   Uygulama seç listesinde ara (paket adı satırın altında yazıyor).
+3. **Satır var ama "harcama değil" diyorsa** → metin sunucuya ulaştı, Groq harcama
+   saymadı. Genelde bakiye/kampanya bildirimidir.
+
+⚠️ **İzin verilmiş görünmesi servisin bağlı olduğu anlamına gelmiyor.** Android, uygulama
+güncellendikten sonra dinleyiciyi geri bağlamayabiliyor; ayar ekranı yeşil kalırken hiçbir
+bildirim gelmez. `requestListenerRebind()` bunun yazılımla yapılan karşılığı — açılışta
+(`MainActivity`) ve bağlantı koptuğunda (`onListenerDisconnected`) kendiliğinden çağrılır.
+
+Dinleyicinin sessizce elediği durumlar (kalıcı bildirim, grup başlığı, metin okunamadı)
+artık **seçili uygulamalar için** kayda düşüyor — eskiden hiçbir iz bırakmadan atlanıyordu.
+Metin çıkarımı da tek alana bakmıyor: `EXTRA_BIG_TEXT`, `EXTRA_TEXT`, `EXTRA_TEXT_LINES`
+(InboxStyle), `EXTRA_SUMMARY_TEXT` ve `tickerText` toplanıp en uzunu seçiliyor.
 
 ## İadeler
 

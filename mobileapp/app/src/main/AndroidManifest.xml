@@ -5,6 +5,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
+      Sadece Ayarlar'daki "Test bildirimi gönder" düğmesi için: uygulama kendine bir
+      bildirim atıyor, dinleyici onu görebiliyor mu diye bakıyoruz. Başka bildirim
+      göndermiyoruz.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
       Ayarlar ekranındaki uygulama seçicisi için: kullanıcının gördüğü (başlatılabilir)
       uygulamaların adlarını okur. QUERY_ALL_PACKAGES'a gerek yok.
     -->
