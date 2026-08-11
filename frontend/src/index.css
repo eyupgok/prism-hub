@@ -30,6 +30,11 @@
     /* Tüm geçişlerde aynı yumuşatma eğrisi kullanılır — hareketin tutarlı
        hissettirmesini sağlayan asıl şey bu. */
     --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* Tarayıcının kendi çizdiği parçalar (açılır liste kutusu, tarih seçici,
+       kaydırma çubukları) bunu görmezse işletim sisteminin AÇIK temasıyla
+       çizilir — beyaz zemine beyaz yazı çıkar. Tek satırla hepsi koyu olur. */
+    color-scheme: dark;
   }
 
   * {
@@ -245,6 +250,17 @@
   .select-field {
     @apply input-field;
     background: var(--bg-soft);
+  }
+  /* Açılan listenin içindeki satırlar. `color-scheme: dark` çoğu yerde yetiyor
+     ama Windows'ta liste bir an açık renge dönebiliyor; bunlar onu sabitliyor. */
+  select option,
+  select optgroup {
+    background-color: #17171f;
+    color: var(--text);
+  }
+  select option:checked {
+    background-color: var(--accent-deep);
+    color: #fff;
   }
 
   .filter-btn {

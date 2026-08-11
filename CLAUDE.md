@@ -20,7 +20,9 @@ Oracle Cloud Always Free VM'de kendi kendine barındırılan, SQLite tabanlı, m
 
 ```
 main.py              → FastAPI app, lifespan, tüm router'lar, CORS (CORS_ORIGINS env),
-                       /health (veritabanı + zamanlayıcı kontrolü; bozuksa 503)
+                       /health (veritabanı + zamanlayıcı + hatırlatıcı döngüsü
+                       kalp atışı; herhangi biri bozuksa 503 — dışarıdaki izleme
+                       servisi bunu alarm sayıyor)
 logging_setup.py     → Tek yerden loglama. `print()` KULLANMA — `get_logger(__name__)`.
                        httpx/apscheduler gürültüsü kısılmış. LOG_LEVEL env ile ayarlanır.
 groq_client.py       → Groq çağrıları için ortak sarmalayıcı: JSON modu
@@ -80,8 +82,17 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
                        Animasyonlar (fadeUp/fadeIn/scaleIn/pulseGlow/float), .glass,
                        .nav-item, .btn-primary, .input-field hep burada tanımlı.
                        Ortak yumuşatma eğrisi: var(--ease) = cubic-bezier(.16,1,.3,1)
+                       ⚠️ `:root { color-scheme: dark }` SİLME. Tarayıcının kendi
+                       çizdiği parçalar (açılır liste kutusu, tarih seçici) bunu
+                       görmezse işletim sisteminin açık temasıyla çizilir —
+                       beyaz zemine beyaz yazı çıkar, seçenekler okunmaz.
+                       `select option` kuralları da aynı sorunun Windows yedeği.
   src/api/client.js  → fetch sarmalayıcı, X-API-Key header (VITE_API_KEY)
-  src/pages/         → Dashboard, Reminders, Notes, Expenses, Budget, Settings, Login
+  src/pages/         → Dashboard, Reminders, Notes, Expenses, Settings, Login
+                       Bütçenin ayrı sayfası YOK — Harcamalar sayfasındaki
+                       "Bütçe" sekmesi (components/BudgetPanel.jsx). Limit koymak
+                       harcamaya bakarken akla gelen bir iş, menüde ayrı durunca
+                       kopuk kalıyordu.
   src/components/ErrorBoundary.jsx
                      → Render hatasında beyaz ekran yerine sebebi gösterir
                        (React'te hata sınırı yalnızca sınıf bileşeniyle yazılabiliyor)
@@ -344,6 +355,28 @@ servis `/etc/systemd/system/prism.service`, vekil `/etc/caddy/Caddyfile`.
 
 **Güvenlik duvarı iki katmanlı:** OCI Security List **ve** sunucunun `iptables`'ı — port açarken
 ikisinde de açman gerekir (`iptables` değişikliği sonrası `sudo netfilter-persistent save`).
+
+### Dışarıdan izleme (uptime)
+
+`https://kendi-alan-adin.example.com/health` ücretsiz bir izleme servisi (UptimeRobot vb.)
+tarafından 5 dakikada bir yoklanır. Kimlik doğrulaması yok — çıktısı sır içermiyor.
+
+Endpoint üç şeye bakar ve **herhangi biri bozuksa 200 yerine 503** döner:
+
+| Kontrol | Ne yakalar |
+|---|---|
+| `database` | SQLite okunamıyor (disk doldu, dosya bozuldu, kilit) |
+| `scheduler` | APScheduler durmuş |
+| `reminder_loop` | Zamanlayıcı ayakta ama dakikalık iş tur atmıyor |
+
+Üçüncüsü asıl önemli olan: `scheduler.running` yalnızca "başlatıldı" demek. İş her
+turda çöküyorsa ya da bir yerde takıldıysa bayrak yeşil kalır, hatırlatıcılar
+sessizce gelmez. `scheduler.check_reminders()` her turun **sonunda**
+`last_reminder_check` damgasını günceller; 5 dakika (`REMINDER_HEARTBEAT_TIMEOUT_SECONDS`)
+haber çıkmazsa takılmış sayılır.
+
+⚠️ İzleme servisini kurarken **"200 dışındaki kodda alarm ver"** ayarını seç. Sadece
+"site açılıyor mu" bakan bir kontrol 503'ü de başarı sayabilir — o zaman bu iş boşa gider.
 
 ### Web paneli (aynı domain, kökte)
 

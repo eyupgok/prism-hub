@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -9,9 +11,27 @@ log = get_logger("prism.scheduler")
 TZ = pytz.timezone("Europe/Istanbul")
 scheduler = AsyncIOScheduler(timezone=TZ)
 
+# Hatırlatıcı döngüsünün en son ne zaman baştan sona döndüğü.
+# `scheduler.running` yalnızca "zamanlayıcı ayakta" demek — iş bir yerde takılırsa
+# ya da her turda çöküyorsa bayrak yine yeşil görünür. Sağlık kontrolü bu damgaya
+# bakarak "çalışıyor ama iş görmüyor" halini de yakalayabiliyor.
+last_reminder_check: datetime | None = None
+
+# Dakikada bir dönmesi gereken iş bu kadar süre haber vermezse takılmış sayılır.
+REMINDER_HEARTBEAT_TIMEOUT_SECONDS = 300
+
+
+def reminder_loop_age_seconds() -> float | None:
+    """Hatırlatıcı döngüsünün son turundan bu yana geçen saniye (hiç dönmediyse None)"""
+    if last_reminder_check is None:
+        return None
+    return (datetime.now(TZ) - last_reminder_check).total_seconds()
+
 
 async def check_reminders():
     """Her 1 dakikada çalışır; bildirim zamanı gelen hatırlatıcıları gönderir"""
+    global last_reminder_check
+
     from database import get_db
     from modules.reminders import service as svc
     from telegram_bot import send_reminder_notification
@@ -37,6 +57,10 @@ async def check_reminders():
                         svc.reschedule_recurring(conn, reminder["id"])
         except Exception as e:
             log.error(f"❌ Bildirim gönderilemedi [ID={reminder['id']}]: {e}")
+
+    # En sonda: tur baştan sona tamamlandıysa damgayı at. Ortada patlarsa damga
+    # eskir ve /health bunu görür.
+    last_reminder_check = datetime.now(TZ)
 
 
 async def cleanup_conversations():
@@ -103,6 +127,12 @@ async def send_weekly_report():
 
 
 def start_scheduler():
+    global last_reminder_check
+
+    # İlk tur bir dakika sonra dönecek; o zamana kadar damga boş kalmasın diye
+    # başlangıç anını yazıyoruz — yoksa açılışta /health kendini bozuk sanardı.
+    last_reminder_check = datetime.now(TZ)
+
     scheduler.add_job(
         check_reminders,
         "interval",

@@ -1,12 +1,10 @@
-import { Home, Bell, FileText, DollarSign, Wallet, Settings } from 'lucide-react'
+import { Home, Bell, FileText, DollarSign, Settings } from 'lucide-react'
 
-// Mobilde 6 sekme sığıyor ama etiketler kısa tutulmalı
 const NAV = [
   { id: 'dashboard', label: 'Panel', icon: Home },
   { id: 'reminders', label: 'Görev', icon: Bell },
   { id: 'notes', label: 'Not', icon: FileText },
   { id: 'expenses', label: 'Harcama', icon: DollarSign },
-  { id: 'budget', label: 'Bütçe', icon: Wallet },
   { id: 'settings', label: 'Ayarlar', icon: Settings },
 ]
 

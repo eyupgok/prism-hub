@@ -243,7 +243,7 @@ export default function Reminders() {
                 type="datetime-local"
                 value={form.due_datetime}
                 onChange={e => setForm(f => ({ ...f, due_datetime: e.target.value }))}
-                className="input-field [color-scheme:dark]"
+                className="input-field"
               />
             </div>
             <div>

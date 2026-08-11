@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Wallet, Plus, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, AlertTriangle } from 'lucide-react'
 import { api } from '../api/client'
-import LoadingSpinner from '../components/LoadingSpinner'
+import LoadingSpinner from './LoadingSpinner'
+
+// Harcamalar sayfasının "Bütçe" sekmesi. Ayrı sayfa değil — limit belirlemek
+// harcamaya bakarken akla gelen bir iş, menüde ayrı durunca kopuk kalıyordu.
 
 const CATEGORIES = ['yemek', 'ulaşım', 'eğlence', 'fatura', 'alışveriş', 'diğer']
 
 const CATEGORY_EMOJI = {
-  yemek: '🍽',
-  ulaşım: '🚌',
-  eğlence: '🎬',
-  fatura: '🧾',
+  yemek: '🍔',
+  ulaşım: '🚗',
+  eğlence: '🎮',
+  fatura: '💡',
   alışveriş: '🛒',
   diğer: '📦',
 }
@@ -25,7 +28,7 @@ function barColor(pct) {
   return 'var(--accent)'
 }
 
-export default function Budget() {
+export default function BudgetPanel() {
   const [budgets, setBudgets] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -64,6 +67,7 @@ export default function Budget() {
   }
 
   async function remove(category) {
+    if (!window.confirm(`"${category}" limitini kaldırmak istiyor musun?`)) return
     try {
       await api.deleteBudget(category)
       await load()
@@ -74,16 +78,6 @@ export default function Budget() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl md:text-3xl font-display font-bold text-white flex items-center gap-2">
-          <Wallet size={22} style={{ color: 'var(--accent-bright)' }} />
-          Bütçe
-        </h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-faint)' }}>
-          Kategori bazlı aylık limitler — %80'i geçince Telegram'dan uyarı gelir
-        </p>
-      </div>
-
       {error && (
         <div className="p-4 rounded-xl border text-sm text-red-400"
           style={{ background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.25)' }}>
@@ -93,7 +87,12 @@ export default function Budget() {
 
       {/* Yeni limit */}
       <form onSubmit={save} className="glass-card p-5 space-y-4">
-        <h2 className="text-white font-display font-semibold text-base">Limit belirle</h2>
+        <div>
+          <h2 className="text-white font-display font-semibold text-base">Limit belirle</h2>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-faint)' }}>
+            %80'i geçince Telegram'dan uyarı gelir. Aynı kategoriye tekrar limit verirsen eskisinin üzerine yazılır.
+          </p>
+        </div>
         <div className="flex flex-col sm:flex-row gap-3">
           <select
             value={form.category}
@@ -113,7 +112,7 @@ export default function Budget() {
             step="any"
             value={form.monthly_limit}
             onChange={(e) => setForm((f) => ({ ...f, monthly_limit: e.target.value }))}
-            placeholder="Aylık limit (TL)"
+            placeholder="Aylık limit (₺)"
             className="input-field flex-1"
           />
           <button type="submit" className="btn-primary sm:w-36" disabled={saving || !form.monthly_limit}>
@@ -121,9 +120,6 @@ export default function Budget() {
             {saving ? 'Kaydediliyor' : 'Kaydet'}
           </button>
         </div>
-        <p className="text-xs" style={{ color: 'var(--text-faint)' }}>
-          Aynı kategoriye tekrar limit verirsen eskisinin üzerine yazılır.
-        </p>
       </form>
 
       {loading ? (
@@ -157,7 +153,7 @@ export default function Budget() {
                     </span>
                     <button
                       onClick={() => remove(b.category)}
-                      className="p-1.5 rounded-lg transition-colors"
+                      className="p-1.5 rounded-lg transition-colors hover:text-red-400"
                       style={{ color: 'var(--text-faint)' }}
                       aria-label={`${b.category} limitini kaldır`}
                     >

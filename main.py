@@ -84,11 +84,12 @@ app.include_router(summary_router, dependencies=protected)
 async def health(response: Response):
     """Dışarıdan izleme için sağlık kontrolü.
 
-    Sadece "ayaktayım" demek yetmiyor: veritabanı okunamıyorsa ya da zamanlayıcı
-    durmuşsa servis çalışıyor görünür ama işe yaramaz. İzleme servisi bunu
-    fark edebilsin diye ikisi de kontrol ediliyor ve bozuksa 503 dönüyor.
+    Sadece "ayaktayım" demek yetmiyor: veritabanı okunamıyorsa, zamanlayıcı
+    durmuşsa ya da hatırlatıcı döngüsü takılmışsa servis çalışıyor görünür ama
+    işe yaramaz. İzleme servisi bunu fark edebilsin diye üçü de kontrol ediliyor
+    ve bozuksa 503 dönüyor.
     """
-    checks = {"database": "ok", "scheduler": "ok"}
+    checks = {"database": "ok", "scheduler": "ok", "reminder_loop": "ok"}
 
     try:
         from database import get_db
@@ -100,10 +101,16 @@ async def health(response: Response):
         log.error("Sağlık kontrolü — veritabanı okunamadı", exc_info=True)
 
     try:
-        from scheduler import scheduler
+        import scheduler as sched
 
-        if not scheduler.running:
+        if not sched.scheduler.running:
             checks["scheduler"] = "durmuş"
+
+        age = sched.reminder_loop_age_seconds()
+        if age is None:
+            checks["reminder_loop"] = "hiç çalışmadı"
+        elif age > sched.REMINDER_HEARTBEAT_TIMEOUT_SECONDS:
+            checks["reminder_loop"] = f"takılmış (son tur {int(age // 60)} dk önce)"
     except Exception as e:
         checks["scheduler"] = f"hata: {type(e).__name__}"
 

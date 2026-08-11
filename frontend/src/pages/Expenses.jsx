@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recha
 import { api } from '../api/client'
 import Modal from '../components/Modal'
 import LoadingSpinner from '../components/LoadingSpinner'
+import BudgetPanel from '../components/BudgetPanel'
 
 const CATEGORIES = ['yemek', 'ulaşım', 'eğlence', 'fatura', 'alışveriş', 'diğer']
 const CAT_ICON = { yemek: '🍔', ulaşım: '🚗', eğlence: '🎮', fatura: '💡', alışveriş: '🛒', diğer: '📦' }
@@ -23,6 +24,7 @@ function nowMonth() {
 }
 
 export default function Expenses() {
+  const [tab, setTab] = useState('list')   // 'list' | 'budget'
   const [expenses, setExpenses] = useState([])
   const [summary, setSummary] = useState(null)
   const [month, setMonth] = useState(nowMonth)
@@ -88,30 +90,52 @@ export default function Expenses() {
             <DollarSign className="text-amber-400" size={22} />
             Harcamalar
           </h1>
-          <p className="text-slate-500 text-sm mt-1">{formatMonth(month)}</p>
+          <p className="text-slate-500 text-sm mt-1">
+            {tab === 'budget' ? 'Kategori bazlı aylık limitler' : formatMonth(month)}
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <input
-            type="month"
-            value={month}
-            onChange={e => setMonth(e.target.value)}
-            className="input-field w-auto [color-scheme:dark]"
-          />
-          <button onClick={() => setShowModal(true)} className="btn-primary">
-            <Plus size={16} />
-            Ekle
-          </button>
-        </div>
+        {tab === 'list' && (
+          <div className="flex items-center gap-3">
+            <input
+              type="month"
+              value={month}
+              onChange={e => setMonth(e.target.value)}
+              className="input-field w-auto"
+            />
+            <button onClick={() => setShowModal(true)} className="btn-primary">
+              <Plus size={16} />
+              Ekle
+            </button>
+          </div>
+        )}
       </div>
 
-      {error && (
+      {/* Sekmeler */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setTab('list')}
+          className={`filter-btn ${tab === 'list' ? 'filter-btn-active' : 'filter-btn-inactive'}`}
+        >
+          İşlemler
+        </button>
+        <button
+          onClick={() => setTab('budget')}
+          className={`filter-btn ${tab === 'budget' ? 'filter-btn-active' : 'filter-btn-inactive'}`}
+        >
+          Bütçe
+        </button>
+      </div>
+
+      {tab === 'budget' && <BudgetPanel />}
+
+      {error && tab === 'list' && (
         <div className="p-3 rounded-xl text-sm text-red-400"
           style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
           {error}
         </div>
       )}
 
-      {loading ? (
+      {tab === 'list' && (loading ? (
         <div className="flex justify-center py-16"><LoadingSpinner size="lg" /></div>
       ) : (
         <>
@@ -249,7 +273,7 @@ export default function Expenses() {
             )}
           </div>
         </>
-      )}
+      ))}
 
       {/* Modal */}
       {showModal && (
@@ -296,7 +320,7 @@ export default function Expenses() {
                 type="date"
                 value={form.expense_date}
                 onChange={e => setForm(f => ({ ...f, expense_date: e.target.value }))}
-                className="input-field [color-scheme:dark]"
+                className="input-field"
               />
             </div>
             {error && <p className="text-xs text-red-400">{error}</p>}
