@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Bell, FileText, DollarSign, Cloud, TrendingUp, ArrowRight } from 'lucide-react'
+import { Bell, FileText, Cloud, TrendingUp, ArrowRight } from 'lucide-react'
+import LiraSign from '../components/LiraSign'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { api } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -202,7 +203,7 @@ export default function Dashboard({ onNavigate }) {
               delay={STAGGER[0]}
             />
             <StatCard
-              icon={<DollarSign size={18} className="text-amber-400" />}
+              icon={<LiraSign size={18} className="text-amber-400" />}
               iconBg="bg-amber-400/10"
               label="Bu Ay Harcama"
               value={`${(summary?.total || 0).toLocaleString('tr-TR')} ₺`}

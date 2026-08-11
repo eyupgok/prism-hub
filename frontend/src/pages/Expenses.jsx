@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, DollarSign, TrendingDown } from 'lucide-react'
+import { Plus, Trash2, TrendingDown } from 'lucide-react'
+import LiraSign from '../components/LiraSign'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { api } from '../api/client'
 import Modal from '../components/Modal'
@@ -87,7 +88,7 @@ export default function Expenses() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <DollarSign className="text-amber-400" size={22} />
+            <LiraSign className="text-amber-400" size={22} />
             Harcamalar
           </h1>
           <p className="text-slate-500 text-sm mt-1">
@@ -231,7 +232,7 @@ export default function Expenses() {
             </div>
             {expenses.length === 0 ? (
               <div className="text-center py-12 text-slate-600">
-                <DollarSign size={48} className="mx-auto mb-3 opacity-20" />
+                <LiraSign size={48} className="mx-auto mb-3 opacity-20" />
                 <p>Bu ay harcama kaydı yok</p>
               </div>
             ) : (

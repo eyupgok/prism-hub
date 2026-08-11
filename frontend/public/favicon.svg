@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!--
+    Tarayıcı sekmesi simgesi. Kenar çubuğundaki logoyla aynı dil: mor degradeli
+    yuvarlak kare + beyaz parıltı. 16 pikselde okunabilmesi için tek ve kalın bir
+    şekil kullanıldı — lucide'daki Sparkles gibi üç yıldızlı hâli o boyutta lekeye
+    dönüşüyor.
+  -->
+  <defs>
+    <linearGradient id="prism" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa" />
+      <stop offset="1" stop-color="#6d28d9" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#prism)" />
+  <path
+    d="M32 11C34.2 23.4 40.6 29.8 53 32 40.6 34.2 34.2 40.6 32 53 29.8 40.6 23.4 34.2 11 32 23.4 29.8 29.8 23.4 32 11Z"
+    fill="#ffffff" />
+</svg>
