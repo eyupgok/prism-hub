@@ -303,7 +303,7 @@ farklı: süreci komple öldürüyor (aynı düğme Spotify'ın çalan müziğin
 | Katman | Ne yapar | Sınırı |
 |---|---|---|
 | Son kullanılanlarda **kilitleme** 🔒 | "hepsini kapat" PRISM'i atlar | kullanıcının elle yapması gerekir |
-| `ListenerWatchdogWorker` | 30 dk'da bir bağlı mı bakar, değilse `requestRebind()` | uygulama "durduruldu" durumuna sokulursa iş de iptal olur |
+| `ListenerWatchdogWorker` | 30 dk'da bir bağlı mı bakar, değilse `requestRebind()` | uygulama "durduruldu" durumuna sokulursa iş de iptal olur; ayrıca telefon ısınınca ertelenir |
 | `catchUpMissed()` | geri bağlanınca panelde bekleyen bildirimleri toplar | bildirim panelden silinmişse kayıp |
 
 `catchUpMissed()` (`onListenerConnected` içinde): ölü geçen sürede düşen bildirimler
@@ -312,6 +312,18 @@ duruyor. Geri bağlanınca `activeNotifications` okunup `lastSeenAt`'ten yeni ol
 işleniyor (en fazla 24 saat geriye). Aynı bildirim ikinci kez gitse bile sunucu
 `source_hash` ile tanıyıp eliyor — çift kayıt riski yok. `lastSeenAt` hiç yoksa
 (ilk kurulum) atlanır, yoksa panelde birikmiş her şey harcamaya dönerdi.
+
+**Ölçüldü (Redmi Note 13 / HyperOS, 12 Ağustos 2026):** süreç beklenmedik şekilde
+ölürse sistem dinleyiciyi **2,6 saniyede** kendiliğinden geri bağlıyor —
+`Scheduling restart of crashed service ... in 1000ms` → `Start proc ... for service`
+→ `notification listener service connected`. Yani asıl korkulacak şey süreç ölümü
+değil, uygulamanın **"durduruldu"** durumuna sokulması. Ayrıca dinleyici bağlıyken
+`adb shell am kill` süreci öldüremiyor bile: bağlantı süreci canlı tutuyor.
+
+⚠️ Bekçi işi JobScheduler'a bağlı, o da **termal kısıtlamaya** tabi: telefon ısındığında
+(`Thermal Status: 2`) iş `STOP ... thermal` ile durduruluyor, yenisi hiç başlatılmıyor.
+`adb shell dumpsys jobscheduler | grep -E "START: #u0a382|STOP: #u0a382"` ile görülür.
+Bekçiye tek başına güvenilmemesinin sebebi bu — kilitleme asıl çözüm.
 
 ⚠️ **Diskteki "bağlı" bilgisi yalan söyleyebilir.** Süreç öldürüldüğünde
 `onListenerDisconnected` hiç çağrılmıyor, `prism_listener_state.xml`'de `connected=true`

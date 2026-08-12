@@ -42,6 +42,10 @@ class ListenerWatchdogWorker(
         val settings = SettingsStore(ctx).settings.first()
         if (!settings.captureEnabled || !hasNotificationAccess(ctx)) return Result.success()
 
+        // Her tur tek satır: "bekçi hâlâ tur atıyor mu?" sorusunun logcat'teki cevabı.
+        // Sessiz kalırsa iş sıradan düşmüş demektir — sebebi genelde zorla durdurmadır.
+        Log.i(TAG, "Bekçi turu — dinleyici bağlı=${ExpenseNotificationListener.isBound}")
+
         if (ExpenseNotificationListener.isBound) return Result.success()
 
         // Diskteki kayıt "bağlı" diyor olabilir; süreç öldürüldüğünde
