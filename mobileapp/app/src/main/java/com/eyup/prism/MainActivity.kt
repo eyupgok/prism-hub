@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.eyup.prism.data.SettingsStore
 import com.eyup.prism.data.api.ApiClient
 import com.eyup.prism.service.CaptureSyncWorker
+import com.eyup.prism.service.ListenerWatchdogWorker
 import com.eyup.prism.service.hasNotificationAccess
 import com.eyup.prism.service.requestListenerRebind
 import com.eyup.prism.ui.screens.ChatScreen
@@ -75,10 +76,15 @@ fun PrismApp() {
         ApiClient.configure(s.baseUrl, s.apiKey)
         // Çevrimdışıyken biriken bildirimler varsa uygulama açılınca gönderilmeye çalışılır
         if (s.isConfigured) CaptureSyncWorker.scheduleNow(context.applicationContext)
-        // İzin duruyor ama servis kopmuş olabilir (güncelleme sonrası sık oluyor).
-        // Bağlıysa bu çağrı hiçbir şey yapmaz; bağlı değilse sessizce geri getirir.
+        // İzin duruyor ama servis kopmuş olabilir (güncelleme sonrası ve süreç
+        // öldürüldükten sonra sık oluyor). Bağlıysa bu çağrı hiçbir şey yapmaz.
         if (s.captureEnabled && hasNotificationAccess(context)) {
             requestListenerRebind(context.applicationContext)
+            // Uygulama kapalıyken de kontrol eden bekçi. Asıl işi burada değil:
+            // süreç öldürüldüğünde onu geri doğurup dinleyiciyi bağlatmak.
+            ListenerWatchdogWorker.schedule(context.applicationContext)
+        } else {
+            ListenerWatchdogWorker.cancel(context.applicationContext)
         }
         if (!autoRedirected) {
             autoRedirected = true

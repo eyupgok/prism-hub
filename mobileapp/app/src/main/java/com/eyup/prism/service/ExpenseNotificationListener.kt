@@ -55,6 +55,21 @@ fun notificationAccessIntent(): Intent =
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
 /**
+ * Kalıcı kayıttaki "bağlı" bilgisini gerçekle karşılaştırır.
+ *
+ * Süreç öldürüldüğünde (son kullanılanlardan "hepsini kapat", pil yöneticisi)
+ * `onListenerDisconnected` HİÇ çağrılmıyor — dosyada "bağlı" yazılı kalıyor ve
+ * ayarlar ekranı yeşil görünürken hiçbir bildirim gelmiyor. Süreç içindeki canlı
+ * bayrak yeniden doğuşta false başladığı için doğruyu o söylüyor.
+ */
+fun reconcileListenerState(context: Context) {
+    val bound = ExpenseNotificationListener.isBound
+    val stored = ListenerState.read(context).connected
+    if (bound == stored) return
+    if (bound) ListenerState.markConnected(context) else ListenerState.markDisconnected(context)
+}
+
+/**
  * Seçilen bankacılık uygulamalarının bildirimlerini yakalayıp sunucuya yollar.
  *
  * Tasarım kararları:
@@ -73,11 +88,14 @@ class ExpenseNotificationListener : NotificationListenerService() {
     private val recentKeys = Collections.synchronizedSet(LinkedHashSet<String>())
 
     override fun onListenerConnected() {
+        isBound = true
         ListenerState.markConnected(applicationContext)
         Log.i(TAG, "Bildirim dinleyici bağlandı")
+        catchUpMissed()
     }
 
     override fun onListenerDisconnected() {
+        isBound = false
         ListenerState.markDisconnected(applicationContext)
         Log.w(TAG, "Bildirim dinleyici koptu — yeniden bağlanma isteniyor")
         // Sistem servisi kapattığında kendiliğinden geri gelmeyebiliyor; kendimiz isteyelim.
@@ -85,17 +103,52 @@ class ExpenseNotificationListener : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        isBound = false
         scope.cancel()
         super.onDestroy()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        val notification = sbn?.notification ?: return
-        val packageName = sbn.packageName ?: return
+        if (sbn == null) return
 
         // Dinleyicinin nabzı: hangi uygulamadan geldiği önemli değil, bir şey GÖRÜYOR
         // olması önemli. Teşhiste ilk bakılacak yer burası.
         ListenerState.markSaw(applicationContext)
+
+        handle(sbn, fromCatchUp = false)
+    }
+
+    /**
+     * Dinleyici ölüyken düşen bildirimleri, geri bağlanınca panelden toplar.
+     *
+     * Süreç öldürüldüğünde (son kullanılanlardaki "hepsini kapat" düğmesi) o aralıkta
+     * gelen bildirimler `onNotificationPosted`'a hiç uğramaz — ama çoğu banka bildirimi
+     * bildirim panelinde durmaya devam ediyor. Geri bağlanır bağlanmaz paneldeki listeyi
+     * okuyup "en son bir şey gördüğüm andan sonrasını" işliyoruz; böylece kapalı geçen
+     * süre tamamen kayıp olmuyor.
+     *
+     * Aynı bildirimi ikinci kez göndermek risksiz: sunucu `source_hash` (paket + metin +
+     * dakika) ile tanıyıp "zaten işlenmiş" diyor.
+     */
+    private fun catchUpMissed() {
+        val lastSeen = ListenerState.read(applicationContext).lastSeenAt
+        // Hiç bildirim görmemişsek panelde ne varsa "geçmiş" sayılır — ilk kurulumda
+        // haftalık birikmiş bildirimleri harcamaya çevirmenin anlamı yok.
+        if (lastSeen == 0L) return
+
+        val cutoff = maxOf(lastSeen, System.currentTimeMillis() - CATCH_UP_MAX_AGE_MS)
+        val active = runCatching { activeNotifications }.getOrNull() ?: return
+        val missed = active.filter { it.postTime > cutoff }
+        if (missed.isEmpty()) return
+
+        Log.i(TAG, "Kopukluk sonrası panelde ${missed.size} bildirim bulundu, işleniyor")
+        missed.forEach { handle(it, fromCatchUp = true) }
+        ListenerState.markSaw(applicationContext)
+    }
+
+    private fun handle(sbn: StatusBarNotification, fromCatchUp: Boolean) {
+        val notification = sbn.notification ?: return
+        val packageName = sbn.packageName ?: return
 
         val isSelfTest = packageName == applicationContext.packageName && sbn.tag == SELF_TEST_TAG
         if (packageName == applicationContext.packageName && !isSelfTest) return
@@ -129,7 +182,11 @@ class ExpenseNotificationListener : NotificationListenerService() {
                 }
 
                 if (packageName !in settings.watchedPackages) {
-                    CaptureLog.add(applicationContext, packageName, Outcome.IGNORED, "Dinlenmiyor")
+                    // Sonradan toplarken panelde ne varsa geliyor — seçili olmayan her
+                    // uygulama için satır açmak listeyi anlamsızca doldurur.
+                    if (!fromCatchUp) {
+                        CaptureLog.add(applicationContext, packageName, Outcome.IGNORED, "Dinlenmiyor")
+                    }
                     return@launch
                 }
 
@@ -179,6 +236,10 @@ class ExpenseNotificationListener : NotificationListenerService() {
                     source = "notification",
                 )
 
+                // Kopukluk sonrası toplananları ayırt edebilelim: "bu harcamayı ben
+                // düşerken değil, geri geldiğimde gördüm" bilgisi teşhiste işe yarıyor.
+                val late = if (fromCatchUp) " · sonradan yakalandı" else ""
+
                 try {
                     ApiClient.configure(settings.baseUrl, settings.apiKey)
                     val result = ApiClient.api().ingestNotification(ingest)
@@ -187,7 +248,7 @@ class ExpenseNotificationListener : NotificationListenerService() {
                         applicationContext,
                         packageName,
                         if (result.recorded) Outcome.SAVED else Outcome.SKIPPED,
-                        result.expense?.let { "${it.amount} ₺ · ${it.category}" } ?: result.reason,
+                        (result.expense?.let { "${it.amount} ₺ · ${it.category}" } ?: result.reason) + late,
                     )
                 } catch (e: Exception) {
                     // Ağ yoksa veya sunucu ulaşılamazsa kaybetme — kuyruğa al, sonra gönder.
@@ -240,7 +301,22 @@ class ExpenseNotificationListener : NotificationListenerService() {
     private fun isoFromMillis(millis: Long): String =
         ISO_LOCAL.withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(millis))
 
-    private companion object {
-        val ISO_LOCAL: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
+    companion object {
+        /**
+         * Servis şu an sisteme bağlı mı — SÜREÇ İÇİ gerçek.
+         *
+         * Diskteki [ListenerState] bu konuda yalan söyleyebiliyor: süreç öldürüldüğünde
+         * `onListenerDisconnected` çağrılmadan gidiyor, dosyada "bağlı" yazılı kalıyor.
+         * Süreç yeniden doğduğunda bu bayrak false başlar; doğrusu budur.
+         */
+        @Volatile
+        var isBound: Boolean = false
+            private set
+
+        private val ISO_LOCAL: DateTimeFormatter =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
+
+        /** Geri bağlanınca bildirim panelinde en fazla bu kadar geriye bakılır */
+        private const val CATCH_UP_MAX_AGE_MS = 24L * 60 * 60 * 1000
     }
 }

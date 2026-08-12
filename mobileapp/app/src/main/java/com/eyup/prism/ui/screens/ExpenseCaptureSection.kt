@@ -48,9 +48,11 @@ import com.eyup.prism.service.CaptureSyncWorker
 import com.eyup.prism.service.canPostNotifications
 import com.eyup.prism.service.hasNotificationAccess
 import com.eyup.prism.service.notificationAccessIntent
+import com.eyup.prism.service.reconcileListenerState
 import com.eyup.prism.service.requestListenerRebind
 import com.eyup.prism.service.sendSelfTestNotification
 import kotlinx.coroutines.delay
+import com.eyup.prism.ui.theme.PrismAmber
 import com.eyup.prism.ui.theme.PrismGreen
 import com.eyup.prism.ui.theme.PrismPurple
 import com.eyup.prism.ui.theme.PrismPurpleLight
@@ -85,6 +87,9 @@ fun ExpenseCaptureSection(store: SettingsStore, settings: PrismSettings) {
     fun refresh() {
         pending = PendingQueue.size(context)
         logEntries = CaptureLog.read(context).reversed()
+        // Diskteki kayıt süreç öldürüldükten sonra "bağlı" kalmış olabilir —
+        // okumadan önce süreç içindeki gerçekle eşitle, yoksa kart yeşil yalan söyler.
+        reconcileListenerState(context)
         listener = ListenerState.read(context)
     }
 
@@ -312,6 +317,12 @@ private fun ListenerStatusBlock(
 ) {
     val timeFormat = remember { SimpleDateFormat("d MMM HH:mm", Locale("tr")) }
 
+    // Bağlı görünüp saatlerdir hiçbir şey görmemek de bir arıza: telefona günde
+    // onlarca bildirim düşüyor, hiçbirini görmüyorsa servis fiilen ölüdür.
+    val silentHours = if (status.lastSeenAt == 0L) 0L
+    else (System.currentTimeMillis() - status.lastSeenAt) / (60 * 60 * 1000L)
+    val looksAsleep = status.connected && silentHours >= SILENT_ALERT_HOURS
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -334,6 +345,15 @@ private fun ListenerStatusBlock(
             color = PrismTextFaint,
             fontSize = 11.sp,
         )
+
+        if (looksAsleep) {
+            Text(
+                "⚠️ Bağlı görünüyor ama $silentHours saattir hiçbir bildirim görmedi. " +
+                    "Aşağıdan test bildirimi gönder — o da görülmezse servis uykuda demektir.",
+                color = PrismAmber,
+                fontSize = 11.sp,
+            )
+        }
 
         if (!status.connected) {
             Text(
@@ -358,8 +378,20 @@ private fun ListenerStatusBlock(
         if (testNote != null) {
             Text(testNote, color = PrismTextMuted, fontSize = 12.sp)
         }
+
+        Text(
+            "💡 Son kullanılanlar ekranındaki \"hepsini kapat\" düğmesi PRISM'i tamamen " +
+                "öldürür ve dinleme durur (Spotify'ın müziğini de aynı düğme susturuyor). " +
+                "PRISM kartını basılı tutup kilitlersen 🔒 o düğme onu atlar. Uygulama " +
+                "yarım saatte bir kendini geri bağlamayı dener, ama kilitlemek en temizi.",
+            color = PrismTextFaint,
+            fontSize = 11.sp,
+        )
     }
 }
+
+/** Bağlı görünürken bu kadar süre sessiz kalmak arıza sayılır */
+private const val SILENT_ALERT_HOURS = 12L
 
 /** Sonuç koduna göre etiket ve renk */
 private fun outcomeLabel(outcome: String): Pair<String, Color> = when (outcome) {

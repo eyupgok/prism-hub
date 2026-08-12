@@ -112,6 +112,10 @@ mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
                                dinleyici görürse zincir sağlam) + requestListenerRebind()
   service/CaptureSyncWorker.kt
                              → WorkManager: internet gelince kuyruğu boşaltır
+  service/ListenerWatchdogWorker.kt
+                             → WorkManager: yarım saatte bir dinleyici bağlı mı diye
+                               bakar, değilse requestRebind(). Süreç öldürüldüğünde
+                               onu geri doğuran mekanizma bu
   ui/screens/                → Chat, Reminders, Notes, Expenses, Settings
                                (+ ExpenseCaptureSection: izin + uygulama seçici +
                                 dinleyici durum kartı)
@@ -287,6 +291,35 @@ Dinleyicinin sessizce elediği durumlar (kalıcı bildirim, grup başlığı, me
 artık **seçili uygulamalar için** kayda düşüyor — eskiden hiçbir iz bırakmadan atlanıyordu.
 Metin çıkarımı da tek alana bakmıyor: `EXTRA_BIG_TEXT`, `EXTRA_TEXT`, `EXTRA_TEXT_LINES`
 (InboxStyle), `EXTRA_SUMMARY_TEXT` ve `tickerText` toplanıp en uzunu seçiliyor.
+
+### Süreç öldürülünce dinleme durması
+
+Son kullanılanlar ekranındaki **"hepsini kapat"** düğmesi uygulamayı normal kapatmaktan
+farklı: süreci komple öldürüyor (aynı düğme Spotify'ın çalan müziğini de susturuyor,
+"geri" ile çıkmak susturmuyor). Dinleyici de o süreçte yaşadığı için ölüyor.
+
+Üç katmanlı savunma var, hiçbiri tek başına yeterli değil:
+
+| Katman | Ne yapar | Sınırı |
+|---|---|---|
+| Son kullanılanlarda **kilitleme** 🔒 | "hepsini kapat" PRISM'i atlar | kullanıcının elle yapması gerekir |
+| `ListenerWatchdogWorker` | 30 dk'da bir bağlı mı bakar, değilse `requestRebind()` | uygulama "durduruldu" durumuna sokulursa iş de iptal olur |
+| `catchUpMissed()` | geri bağlanınca panelde bekleyen bildirimleri toplar | bildirim panelden silinmişse kayıp |
+
+`catchUpMissed()` (`onListenerConnected` içinde): ölü geçen sürede düşen bildirimler
+`onNotificationPosted`'a hiç uğramıyor, ama çoğu banka bildirimi bildirim panelinde
+duruyor. Geri bağlanınca `activeNotifications` okunup `lastSeenAt`'ten yeni olanlar
+işleniyor (en fazla 24 saat geriye). Aynı bildirim ikinci kez gitse bile sunucu
+`source_hash` ile tanıyıp eliyor — çift kayıt riski yok. `lastSeenAt` hiç yoksa
+(ilk kurulum) atlanır, yoksa panelde birikmiş her şey harcamaya dönerdi.
+
+⚠️ **Diskteki "bağlı" bilgisi yalan söyleyebilir.** Süreç öldürüldüğünde
+`onListenerDisconnected` hiç çağrılmıyor, `prism_listener_state.xml`'de `connected=true`
+kalıyor. Gerçeği süreç içindeki `ExpenseNotificationListener.isBound` bayrağı söylüyor
+(yeniden doğuşta false başlar); `reconcileListenerState()` ikisini eşitliyor ve hem
+bekçi hem ayarlar ekranı bunu çağırıyor. Durum kartı ayrıca **bağlı görünüp 12 saattir
+hiçbir şey görmemişse** uyarı basıyor — telefona günde onlarca bildirim düştüğü için
+bu sessizlik fiilen ölüm demek.
 
 ## İadeler
 
