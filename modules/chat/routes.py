@@ -1,5 +1,7 @@
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
+
+from auth import verify_api_key
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -32,11 +34,21 @@ async def _read_limited(upload: UploadFile, max_bytes: int) -> bytes:
 
 class ChatMessage(BaseModel):
     message: str
-    chat_id: str = "mobile"
+
+
+def sohbet_kovasi(user: dict) -> str:
+    """Konuşma geçmişinin anahtarı — HER ZAMAN sunucuda, giriş yapan kişiden üretilir.
+
+    Eskiden istemci `chat_id` gönderiyordu ve varsayılanı sabit "mobile" idi:
+    Telegram dışı bütün istemciler tek bir kovaya yazıyordu. İki kullanıcıda bu,
+    Groq'a karşıdakinin konuşma geçmişini bağlam diye vermek demekti. Artık
+    istemcinin gönderdiği değere bakılmıyor.
+    """
+    return f"panel:{user['id']}"
 
 
 @router.post("/")
-async def chat(data: ChatMessage):
+async def chat(data: ChatMessage, user: dict = Depends(verify_api_key)):
     """Doğal dil mesajını AI router'a iletir (mobil/web istemciler için).
 
     Yanıt metni Telegram ile aynı biçimde basit HTML etiketleri (<b>, <i>, <s>)
@@ -48,12 +60,15 @@ async def chat(data: ChatMessage):
     if not text:
         raise HTTPException(status_code=400, detail="Mesaj boş olamaz")
 
-    response = await route_message(text, data.chat_id)
+    response = await route_message(text, sohbet_kovasi(user), user["id"])
     return {"response": response}
 
 
 @router.post("/voice")
-async def chat_voice(file: UploadFile = File(...), chat_id: str = Form("mobile")):
+async def chat_voice(
+    file: UploadFile = File(...),
+    user: dict = Depends(verify_api_key),
+):
     """Ses dosyasını Whisper ile metne çevirip AI router'a iletir"""
     from ai_router import route_message
     from modules.chat.service import transcribe_audio
@@ -74,7 +89,7 @@ async def chat_voice(file: UploadFile = File(...), chat_id: str = Form("mobile")
     if not text:
         raise HTTPException(status_code=400, detail="Seste anlaşılır konuşma bulunamadı")
 
-    response = await route_message(text, chat_id)
+    response = await route_message(text, sohbet_kovasi(user), user["id"])
     return {"transcript": text, "response": response}
 
 
@@ -82,7 +97,7 @@ async def chat_voice(file: UploadFile = File(...), chat_id: str = Form("mobile")
 async def chat_image(
     file: UploadFile = File(...),
     message: str = Form(""),
-    chat_id: str = Form("mobile"),
+    user: dict = Depends(verify_api_key),
 ):
     """Görseli vision modeliyle analiz edip AI router'a iletir.
 
@@ -107,5 +122,5 @@ async def chat_image(
         raise HTTPException(status_code=502, detail=f"Görsel analizi başarısız: {e}")
 
     text = f"{hint}\n\n[Görsel analizi]: {description}" if hint else f"[Görsel analizi]: {description}"
-    response = await route_message(text, chat_id)
+    response = await route_message(text, sohbet_kovasi(user), user["id"])
     return {"description": description, "response": response}

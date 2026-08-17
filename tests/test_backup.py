@@ -10,10 +10,11 @@ import tempfile
 
 import backup
 from modules.expenses import service as exp_svc
+from conftest import SAHIP, OTEKI
 
 
 def test_yedek_geri_yuklenebilir(db):
-    exp_svc.create_expense(db, 185.50, "yemek", "Test harcaması", "2026-08-09")
+    exp_svc.create_expense(db, SAHIP, 185.50, "yemek", "Test harcaması", "2026-08-09")
     db.commit()
 
     blob = backup.create_snapshot()

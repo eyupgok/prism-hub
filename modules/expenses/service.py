@@ -41,6 +41,7 @@ def is_refund(amount: float) -> bool:
 
 def create_expense(
     conn: sqlite3.Connection,
+    owner_id: int,
     amount: float,
     category: str,
     description: str = "",
@@ -58,9 +59,10 @@ def create_expense(
 
     cursor = conn.execute(
         """INSERT INTO expenses
-             (amount, category, description, expense_date, created_at, source, source_hash, source_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (amount, category, description, expense_date, now.isoformat(),
+             (owner_id, amount, category, description, expense_date, created_at,
+              source, source_hash, source_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (owner_id, amount, category, description, expense_date, now.isoformat(),
          source, source_hash, source_at),
     )
     return get_expense_by_id(conn, cursor.lastrowid)
@@ -84,6 +86,7 @@ AUTO_SOURCES = ("notification", "sms", "receipt")
 
 def find_duplicate(
     conn: sqlite3.Connection,
+    owner_id: int,
     amount: float,
     source_at: Optional[str] = None,
     window_minutes: int = 5,
@@ -110,12 +113,16 @@ def find_duplicate(
     if not day:
         return None
 
+    # Kıyaslama YALNIZ aynı kişinin kayıtları arasında. Sahip süzgeci olmasaydı
+    # ikinizin aynı gün aynı tutarlı iki ayrı alışverişi çift sanılıp birinizinki
+    # sessizce elenirdi — hem de tam olarak birlikte alışveriş yaptığınız günlerde.
     placeholders = ",".join("?" * len(AUTO_SOURCES))
     neighbours = conn.execute(
         f"""SELECT * FROM expenses
-            WHERE source IN ({placeholders})
+            WHERE owner_id = ?
+              AND source IN ({placeholders})
               AND expense_date IN (?, date(?, '-1 day'), date(?, '+1 day'))""",
-        (*AUTO_SOURCES, day, day, day),
+        (owner_id, *AUTO_SOURCES, day, day, day),
     ).fetchall()
 
     window = timedelta(minutes=window_minutes)
@@ -139,19 +146,28 @@ def find_duplicate(
     return same_day_match
 
 
-def get_expense_by_source_hash(conn: sqlite3.Connection, source_hash: str) -> Optional[Dict[str, Any]]:
-    """Aynı bildirim daha önce işlendi mi? (tekrar kaydı önlemek için)"""
-    row = conn.execute("SELECT * FROM expenses WHERE source_hash = ?", (source_hash,)).fetchone()
+def get_expense_by_source_hash(
+    conn: sqlite3.Connection, owner_id: int, source_hash: str
+) -> Optional[Dict[str, Any]]:
+    """Aynı bildirim daha önce işlendi mi? (tekrar kaydı önlemek için)
+
+    Tekillik indeksi de (owner_id, source_hash) — sorgu onunla aynı hizada.
+    """
+    row = conn.execute(
+        "SELECT * FROM expenses WHERE owner_id = ? AND source_hash = ?",
+        (owner_id, source_hash),
+    ).fetchone()
     return dict(row) if row else None
 
 
 def update_expense_category(
-    conn: sqlite3.Connection, expense_id: int, category: str
+    conn: sqlite3.Connection, owner_id: int, expense_id: int, category: str
 ) -> Optional[Dict[str, Any]]:
     if category not in VALID_CATEGORIES:
         return None
     cursor = conn.execute(
-        "UPDATE expenses SET category = ? WHERE id = ?", (category, expense_id)
+        "UPDATE expenses SET category = ? WHERE id = ? AND owner_id = ?",
+        (category, expense_id, owner_id),
     )
     if cursor.rowcount == 0:
         return None
@@ -159,12 +175,14 @@ def update_expense_category(
 
 
 def get_expense_by_id(conn: sqlite3.Connection, expense_id: int) -> Optional[Dict[str, Any]]:
+    """Sahibine bakmadan getirir — sahiplik kontrolünü rota yapar."""
     row = conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone()
     return dict(row) if row else None
 
 
 def list_expenses(
     conn: sqlite3.Connection,
+    owner_id: int,
     month: Optional[str] = None,
     category: Optional[str] = None,
     since: Optional[str] = None,
@@ -179,8 +197,8 @@ def list_expenses(
     `limit`/`offset` sayfalama için; varsayılan sınırsız çünkü özetler toplamı
     doğru hesaplayabilmek için hepsine ihtiyaç duyuyor.
     """
-    query = "SELECT * FROM expenses WHERE 1=1"
-    params: list = []
+    query = "SELECT * FROM expenses WHERE owner_id = ?"
+    params: list = [owner_id]
 
     if month:
         query += " AND expense_date LIKE ?"
@@ -205,14 +223,16 @@ def list_expenses(
 
 def get_monthly_summary(
     conn: sqlite3.Connection,
+    owner_id: int,
     month: Optional[str] = None,
 ) -> Dict[str, Any]:
     if not month:
         month = datetime.now(TZ).strftime("%Y-%m")
 
     rows = conn.execute(
-        "SELECT category, SUM(amount) as total FROM expenses WHERE expense_date LIKE ? GROUP BY category",
-        (f"{month}%",),
+        "SELECT category, SUM(amount) as total FROM expenses "
+        "WHERE owner_id = ? AND expense_date LIKE ? GROUP BY category",
+        (owner_id, f"{month}%"),
     ).fetchall()
 
     by_category = {r["category"]: r["total"] for r in rows}
@@ -221,47 +241,63 @@ def get_monthly_summary(
     return {"month": month, "total": total, "by_category": by_category}
 
 
-def delete_expense(conn: sqlite3.Connection, expense_id: int) -> bool:
-    cursor = conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+def delete_expense(conn: sqlite3.Connection, owner_id: int, expense_id: int) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM expenses WHERE id = ? AND owner_id = ?", (expense_id, owner_id)
+    )
     return cursor.rowcount > 0
 
 
 # ── Bütçe fonksiyonları ──────────────────────────────────────────────────────
 
-def set_budget(conn: sqlite3.Connection, category: str, monthly_limit: float) -> Dict[str, Any]:
+def set_budget(
+    conn: sqlite3.Connection, owner_id: int, category: str, monthly_limit: float
+) -> Dict[str, Any]:
     now = datetime.now(TZ).isoformat()
+    # Tekillik artık (owner_id, category) — ikiniz aynı kategoriye ayrı limit koyabiliyorsunuz.
     conn.execute(
-        """INSERT INTO budgets (category, monthly_limit, created_at) VALUES (?, ?, ?)
-           ON CONFLICT(category) DO UPDATE SET monthly_limit = excluded.monthly_limit""",
-        (category, monthly_limit, now),
+        """INSERT INTO budgets (owner_id, category, monthly_limit, created_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(owner_id, category) DO UPDATE SET monthly_limit = excluded.monthly_limit""",
+        (owner_id, category, monthly_limit, now),
     )
-    return get_budget_by_category(conn, category)
+    return get_budget_by_category(conn, owner_id, category)
 
 
-def get_budget_by_category(conn: sqlite3.Connection, category: str) -> Optional[Dict[str, Any]]:
-    row = conn.execute("SELECT * FROM budgets WHERE category = ?", (category,)).fetchone()
+def get_budget_by_category(
+    conn: sqlite3.Connection, owner_id: int, category: str
+) -> Optional[Dict[str, Any]]:
+    row = conn.execute(
+        "SELECT * FROM budgets WHERE owner_id = ? AND category = ?", (owner_id, category)
+    ).fetchone()
     return dict(row) if row else None
 
 
-def get_all_budgets(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
-    return [dict(r) for r in conn.execute("SELECT * FROM budgets ORDER BY category").fetchall()]
+def get_all_budgets(conn: sqlite3.Connection, owner_id: int) -> List[Dict[str, Any]]:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM budgets WHERE owner_id = ? ORDER BY category", (owner_id,)
+    ).fetchall()]
 
 
-def delete_budget(conn: sqlite3.Connection, category: str) -> bool:
-    cursor = conn.execute("DELETE FROM budgets WHERE category = ?", (category,))
+def delete_budget(conn: sqlite3.Connection, owner_id: int, category: str) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM budgets WHERE owner_id = ? AND category = ?", (owner_id, category)
+    )
     return cursor.rowcount > 0
 
 
-def check_budget_alert(conn: sqlite3.Connection, category: str, month: str = None) -> Optional[str]:
+def check_budget_alert(
+    conn: sqlite3.Connection, owner_id: int, category: str, month: str = None
+) -> Optional[str]:
     """Kategori bütçesi %80+ kullanıldıysa uyarı mesajı döner, yoksa None"""
     if not month:
         month = datetime.now(TZ).strftime("%Y-%m")
-    budget = get_budget_by_category(conn, category)
+    budget = get_budget_by_category(conn, owner_id, category)
     if not budget:
         return None
     row = conn.execute(
-        "SELECT SUM(amount) as total FROM expenses WHERE expense_date LIKE ? AND category = ?",
-        (f"{month}%", category),
+        "SELECT SUM(amount) as total FROM expenses "
+        "WHERE owner_id = ? AND expense_date LIKE ? AND category = ?",
+        (owner_id, f"{month}%", category),
     ).fetchone()
     # İadeler eksi yazıldığı için toplamdan kendiliğinden düşüyor
     current = row["total"] or 0

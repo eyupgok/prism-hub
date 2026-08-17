@@ -173,7 +173,7 @@ async def parse_message(user_message: str, history: List[Dict] = None) -> Dict[s
 MAX_COMMANDS = 5
 
 
-async def dispatch(parsed: Dict[str, Any]) -> str:
+async def dispatch(parsed: Dict[str, Any], owner_id: int) -> str:
     """Komut(ları) çalıştırır.
 
     İki biçim kabul edilir:
@@ -188,15 +188,15 @@ async def dispatch(parsed: Dict[str, Any]) -> str:
         results = []
         for command in commands[:MAX_COMMANDS]:
             if isinstance(command, dict):
-                results.append(await dispatch_one(command))
+                results.append(await dispatch_one(command, owner_id))
         if len(commands) > MAX_COMMANDS:
             results.append(f"<i>({len(commands) - MAX_COMMANDS} komut atlandı)</i>")
         return "\n\n".join(r for r in results if r)
 
-    return await dispatch_one(parsed)
+    return await dispatch_one(parsed, owner_id)
 
 
-async def dispatch_one(parsed: Dict[str, Any]) -> str:
+async def dispatch_one(parsed: Dict[str, Any], owner_id: int) -> str:
     """Tek bir komutu ilgili servis fonksiyonuna yönlendirir"""
     module = parsed.get("module")
     action = parsed.get("action")
@@ -207,25 +207,27 @@ async def dispatch_one(parsed: Dict[str, Any]) -> str:
             return _esc(params.get("message", "Nasıl yardımcı olabilirim?"))
 
         if module == "reminders":
-            return await _handle_reminders(action, params)
+            return await _handle_reminders(action, params, owner_id)
 
         if module == "notes":
-            return await _handle_notes(action, params)
+            return await _handle_notes(action, params, owner_id)
 
         if module == "expenses":
-            return await _handle_expenses(action, params)
+            return await _handle_expenses(action, params, owner_id)
 
         if module == "budget":
-            return await _handle_budget(action, params)
+            return await _handle_budget(action, params, owner_id)
 
         if module == "weather":
             from modules.weather import service as weather_svc
-            weather = await weather_svc.get_weather()
+            from auth import kullanici_getir
+
+            weather = await weather_svc.get_weather(kullanici_getir(owner_id))
             return weather_svc.format_weather_message(weather)
 
         if module == "summary":
             from modules.summary import service as summary_svc
-            return await summary_svc.get_morning_summary()
+            return await summary_svc.get_morning_summary(owner_id)
 
         return f"❓ Bilinmeyen modül: {module}"
 
@@ -239,7 +241,7 @@ async def dispatch_one(parsed: Dict[str, Any]) -> str:
         return "⚠️ İşlem sırasında bir hata oluştu. Kayıtlara not düştüm."
 
 
-async def _handle_reminders(action: str, params: Dict) -> str:
+async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
     from database import get_db
     from modules.reminders import service as svc
 
@@ -247,6 +249,7 @@ async def _handle_reminders(action: str, params: Dict) -> str:
         if action == "create":
             r = svc.create_reminder(
                 conn,
+                owner_id,
                 params["title"],
                 params["due_datetime"],
                 params.get("priority", 2),
@@ -265,7 +268,7 @@ async def _handle_reminders(action: str, params: Dict) -> str:
             return msg
 
         if action == "list":
-            reminders = svc.list_reminders(conn, False)
+            reminders = svc.list_reminders(conn, owner_id, False)
             if not reminders:
                 return "📋 Aktif hatırlatıcı yok."
             lines = ["📋 <b>Hatırlatıcılarınız:</b>\n"]
@@ -279,6 +282,7 @@ async def _handle_reminders(action: str, params: Dict) -> str:
         if action == "update":
             r = svc.update_reminder(
                 conn,
+                owner_id,
                 params.get("id"),
                 params.get("title"),
                 params.get("due_datetime"),
@@ -295,7 +299,7 @@ async def _handle_reminders(action: str, params: Dict) -> str:
             )
 
         if action == "complete":
-            r = svc.complete_reminder(conn, params.get("id"))
+            r = svc.complete_reminder(conn, owner_id, params.get("id"))
             if not r:
                 return "❌ Hatırlatıcı bulunamadı."
             if r.get("rescheduled"):
@@ -315,13 +319,13 @@ async def _handle_reminders(action: str, params: Dict) -> str:
     return f"❓ Bilinmeyen aksiyon: {action}"
 
 
-async def _handle_notes(action: str, params: Dict) -> str:
+async def _handle_notes(action: str, params: Dict, owner_id: int) -> str:
     from database import get_db
     from modules.notes import service as svc
 
     with get_db() as conn:
         if action == "create":
-            n = svc.create_note(conn, params["title"], params["content"], params.get("category", "genel"))
+            n = svc.create_note(conn, owner_id, params["title"], params["content"], params.get("category", "genel"))
             return f"📝 Not kaydedildi!\n📌 {_esc(n['title'])}\n🏷 {n['category']}"
 
         if action == "read":
@@ -332,7 +336,7 @@ async def _handle_notes(action: str, params: Dict) -> str:
 
         if action == "list":
             cat = params.get("category")
-            notes = svc.list_notes(conn, cat)
+            notes = svc.list_notes(conn, owner_id, cat)
             if not notes:
                 return "📝 Not bulunamadı."
             header = f"📝 <b>Notlar{' — ' + _esc(cat) if cat else ''}:</b>\n"
@@ -340,7 +344,7 @@ async def _handle_notes(action: str, params: Dict) -> str:
             return "\n".join(lines)
 
         if action == "search":
-            notes = svc.search_notes(conn, params.get("query", ""))
+            notes = svc.search_notes(conn, owner_id, params.get("query", ""))
             if not notes:
                 return f"🔍 '{_esc(params.get('query'))}' için sonuç bulunamadı."
             lines = ["🔍 <b>Arama sonuçları:</b>\n"] + [
@@ -351,6 +355,7 @@ async def _handle_notes(action: str, params: Dict) -> str:
         if action == "update":
             n = svc.update_note(
                 conn,
+                owner_id,
                 params.get("id"),
                 params.get("title"),
                 params.get("content"),
@@ -406,7 +411,7 @@ def _receipt_moment(params: Dict) -> Optional[str]:
         return None
 
 
-async def _check_receipt_duplicate(conn, params: Dict) -> Optional[str]:
+async def _check_receipt_duplicate(conn, params: Dict, owner_id: int) -> Optional[str]:
     """Fişteki alışveriş zaten kayıtlıysa uyarı metni döner, değilse None."""
     from modules.expenses import service as svc
     from modules.expenses.ingest import (
@@ -421,6 +426,7 @@ async def _check_receipt_duplicate(conn, params: Dict) -> Optional[str]:
 
     twin = svc.find_duplicate(
         conn,
+        owner_id,
         params["amount"],
         source_at=source_at,
         window_minutes=DUPLICATE_WINDOW_MINUTES,
@@ -454,7 +460,7 @@ async def _check_receipt_duplicate(conn, params: Dict) -> Optional[str]:
     return "🔁 Bu alışveriş zaten kayıtlı — aşağıdaki mesajdan yine de ekleyebilirsin."
 
 
-async def _handle_expenses(action: str, params: Dict) -> str:
+async def _handle_expenses(action: str, params: Dict, owner_id: int) -> str:
     from database import get_db
     from modules.expenses import service as svc
 
@@ -463,13 +469,14 @@ async def _handle_expenses(action: str, params: Dict) -> str:
             # Fişten okunan harcama, banka bildiriminden zaten kaydedilmiş olabilir.
             # Elle yazılan harcamalara karışmıyoruz — kullanıcı bilerek girmiştir.
             if params.get("from_receipt"):
-                warning = await _check_receipt_duplicate(conn, params)
+                warning = await _check_receipt_duplicate(conn, params, owner_id)
                 if warning:
                     return warning
 
             try:
                 e = svc.create_expense(
                     conn,
+                    owner_id,
                     params["amount"],
                     params.get("category", "diğer"),
                     params.get("description", ""),
@@ -486,13 +493,13 @@ async def _handle_expenses(action: str, params: Dict) -> str:
                 f"📅 {e['expense_date']}\n"
                 f"📝 {_esc(e['description']) or '—'}"
             )
-            alert = svc.check_budget_alert(conn, e["category"])
+            alert = svc.check_budget_alert(conn, owner_id, e["category"])
             if alert:
                 msg += f"\n\n{alert}"
             return msg
 
         if action == "list":
-            expenses = svc.list_expenses(conn, params.get("month"))
+            expenses = svc.list_expenses(conn, owner_id, params.get("month"))
             if not expenses:
                 return "💰 Harcama bulunamadı."
             total = sum(e["amount"] for e in expenses)
@@ -505,7 +512,7 @@ async def _handle_expenses(action: str, params: Dict) -> str:
             return "\n".join(lines)
 
         if action == "summary":
-            s = svc.get_monthly_summary(conn, params.get("month"))
+            s = svc.get_monthly_summary(conn, owner_id, params.get("month"))
             lines = [f"📊 <b>{s['month']} Harcama Özeti:</b>\n", f"💰 Toplam: {s['total']:.0f} TL\n"]
             for cat, total in sorted(s["by_category"].items(), key=lambda x: x[1], reverse=True):
                 lines.append(f"  • {cat}: {total:.0f} TL")
@@ -523,42 +530,55 @@ async def _handle_expenses(action: str, params: Dict) -> str:
     return f"❓ Bilinmeyen aksiyon: {action}"
 
 
-async def _handle_budget(action: str, params: Dict) -> str:
+async def _handle_budget(action: str, params: Dict, owner_id: int) -> str:
     from database import get_db
     from modules.expenses import service as svc
 
     with get_db() as conn:
         if action == "set":
-            b = svc.set_budget(conn, params["category"], float(params["amount"]))
+            b = svc.set_budget(conn, owner_id, params["category"], float(params["amount"]))
             return f"✅ Bütçe limiti ayarlandı!\n🏷 {b['category']}: {b['monthly_limit']:.0f} TL/ay"
 
         if action == "list":
-            budgets = svc.get_all_budgets(conn)
+            budgets = svc.get_all_budgets(conn, owner_id)
             if not budgets:
                 return "📊 Henüz bütçe limiti ayarlanmamış.\n💡 Örnek: 'Yemek için aylık 3000 TL bütçe koy'"
             lines = ["📊 <b>Aylık Bütçe Limitleri:</b>\n"]
             month = datetime.now(TZ).strftime("%Y-%m")
             for b in budgets:
-                alert = svc.check_budget_alert(conn, b["category"], month)
+                alert = svc.check_budget_alert(conn, owner_id, b["category"], month)
                 status = "🚨" if alert and "aşıldı" in alert else ("⚠️" if alert else "✅")
                 lines.append(f"{status} {b['category']}: {b['monthly_limit']:.0f} TL/ay")
             return "\n".join(lines)
 
         if action == "delete":
-            ok = svc.delete_budget(conn, params.get("category", ""))
+            ok = svc.delete_budget(conn, owner_id, params.get("category", ""))
             return "🗑 Bütçe limiti kaldırıldı." if ok else "❌ Kategori bulunamadı."
 
     return f"❓ Bilinmeyen aksiyon: {action}"
 
 
-async def route_message(user_message: str, chat_id: str = "") -> str:
-    """Ana giriş: mesajı Groq'a gönderir, modüle yönlendirir, cevabı döner"""
+async def route_message(user_message: str, chat_id: str = "", owner_id: int = None) -> str:
+    """Ana giriş: mesajı Groq'a gönderir, modüle yönlendirir, cevabı döner.
+
+    `owner_id` verilmezse chat_id'den çözülür — Telegram tarafı zaten kullanıcıyı
+    bulup geçiriyor, ama REST/panel yolu chat_id ile geliyor. İkisi de bulunamazsa
+    istek reddedilir: sahipsiz bir komutun kimin verisine yazacağı belirsizdir.
+    """
+    from auth import kullanici_chat_id_ile
     from database import save_message, get_recent_messages
+
+    if owner_id is None:
+        k = kullanici_chat_id_ile(chat_id)
+        if not k:
+            log.warning("Sahibi çözülemeyen mesaj yok sayıldı (chat_id=%s)", chat_id)
+            return "⛔ Seni tanıyamadım."
+        owner_id = k["id"]
 
     try:
         history = get_recent_messages(chat_id, HISTORY_LIMIT) if chat_id else []
         parsed = await parse_message(user_message, history)
-        response = await dispatch(parsed)
+        response = await dispatch(parsed, owner_id)
 
         if chat_id:
             save_message(chat_id, "user", user_message)

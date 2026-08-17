@@ -89,41 +89,48 @@ async def nightly_backup():
         log.error(f"❌ Yedekleme işi çöktü: {type(e).__name__}: {e}")
 
 
-async def send_morning_summary():
-    """Her sabah 08:00'de (Istanbul) günlük özet gönderir"""
-    from modules.summary import service as summary_svc
+async def _herkese_ozet(uretici, ad: str):
+    """Özeti her kullanıcı için ayrı üretip kendi sohbetine yollar.
+
+    Telegram'a hiç bağlanmamış (chat_id'si boş) kullanıcı atlanır — özeti
+    üretmenin anlamı yok, gidecek yer yok.
+
+    Hata tek kişiyle sınırlı: birinin özeti patlarsa diğerininki yine gider.
+    Tek try bloğuyla sarsaydık bir kişinin bozuk verisi herkesin sabah
+    özetini sessizce düşürürdü.
+    """
+    from auth import tum_kullanicilar
     from telegram_bot import send_message
 
-    try:
-        text = await summary_svc.get_morning_summary()
-        await send_message(text)
-        log.info("✅ Sabah özeti gönderildi")
-    except Exception as e:
-        log.error(f"❌ Sabah özeti gönderilemedi: {e}")
+    for k in tum_kullanicilar():
+        if not k["telegram_chat_id"]:
+            continue
+        try:
+            await send_message(await uretici(k["id"]), chat_id=k["telegram_chat_id"])
+            log.info("✅ %s gönderildi (%s)", ad, k["ad"])
+        except Exception:
+            log.exception("❌ %s gönderilemedi (%s)", ad, k["ad"])
+
+
+async def send_morning_summary():
+    """Her sabah 08:00'de (Istanbul) günlük özet gönderir — herkese kendi özeti"""
+    from modules.summary import service as summary_svc
+
+    await _herkese_ozet(summary_svc.get_morning_summary, "Sabah özeti")
 
 
 async def send_evening_summary():
     """Her akşam 21:00'de günün karnesini gönderir"""
     from modules.summary import service as summary_svc
-    from telegram_bot import send_message
 
-    try:
-        await send_message(await summary_svc.get_evening_summary())
-        log.info("✅ Akşam özeti gönderildi")
-    except Exception:
-        log.exception("❌ Akşam özeti gönderilemedi")
+    await _herkese_ozet(summary_svc.get_evening_summary, "Akşam özeti")
 
 
 async def send_weekly_report():
     """Her pazar 20:00'de haftalık raporu gönderir"""
     from modules.summary import service as summary_svc
-    from telegram_bot import send_message
 
-    try:
-        await send_message(await summary_svc.get_weekly_report())
-        log.info("✅ Haftalık rapor gönderildi")
-    except Exception:
-        log.exception("❌ Haftalık rapor gönderilemedi")
+    await _herkese_ozet(summary_svc.get_weekly_report, "Haftalık rapor")
 
 
 def start_scheduler():

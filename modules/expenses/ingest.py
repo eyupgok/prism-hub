@@ -190,6 +190,7 @@ def save_remembered_duplicate(candidate: Dict[str, Any]) -> Dict[str, Any]:
     with get_db() as conn:
         return service.create_expense(
             conn,
+            owner_id=candidate["owner_id"],
             amount=candidate["amount"],
             category=candidate["category"],
             description=candidate["description"],
@@ -207,6 +208,7 @@ def format_tl(amount: float) -> str:
 
 
 async def ingest_notification(
+    owner_id: int,
     package_name: str,
     title: str,
     text: str,
@@ -214,6 +216,9 @@ async def ingest_notification(
     source: str = "notification",
 ) -> Dict[str, Any]:
     """Bildirimi işler. Harcamaysa kaydeder ve Telegram'dan haber verir.
+
+    `owner_id` isteği yapan API anahtarının sahibinden gelir — harcama ve
+    bildirimi ona yazılır, çift kayıt kontrolü de yalnız onun kayıtlarına bakar.
 
     Dönüş: {"recorded": bool, "reason": str, "expense": {...} | None}
     """
@@ -229,7 +234,7 @@ async def ingest_notification(
 
     source_hash = compute_hash(package_name, text, posted_at)
     with get_db() as conn:
-        existing = service.get_expense_by_source_hash(conn, source_hash)
+        existing = service.get_expense_by_source_hash(conn, owner_id, source_hash)
     if existing:
         return {"recorded": False, "reason": "Bu bildirim zaten işlenmiş", "expense": existing}
 
@@ -247,6 +252,7 @@ async def ingest_notification(
     description = parsed["merchant"] or "Banka bildirimi"
 
     candidate = {
+        "owner_id": owner_id,
         "amount": parsed["amount"],
         "category": parsed["category"],
         "description": description,
@@ -259,7 +265,7 @@ async def ingest_notification(
     # Aynı alışveriş hem banka uygulamasından hem SMS'ten gelmiş olabilir
     with get_db() as conn:
         twin = service.find_duplicate(
-            conn, parsed["amount"], source_at, DUPLICATE_WINDOW_MINUTES
+            conn, owner_id, parsed["amount"], source_at, DUPLICATE_WINDOW_MINUTES
         )
     if twin:
         _prune_pending()
@@ -272,7 +278,7 @@ async def ingest_notification(
     try:
         with get_db() as conn:
             expense = service.create_expense(conn, **candidate)
-            alert = service.check_budget_alert(conn, expense["category"])
+            alert = service.check_budget_alert(conn, owner_id, expense["category"])
     except service.InvalidAmount as e:
         log.warning(f"⚠️  Bildirimden gelen tutar reddedildi ({package_name}): {e}")
         return {"recorded": False, "reason": f"Tutar geçersiz: {e}", "expense": None}
@@ -321,7 +327,7 @@ async def _notify_duplicate(candidate: Dict[str, Any], existing: Dict[str, Any])
     """Elenen çift kaydı haber verir — yanlış eleme olduysa geri alınabilsin."""
     import html
 
-    from telegram_bot import send_message
+    from telegram_bot import send_message, sahibin_chati
 
     token = remember_duplicate(candidate)
     text = "\n".join([
@@ -334,18 +340,20 @@ async def _notify_duplicate(candidate: Dict[str, Any], existing: Dict[str, Any])
     ]]}
 
     try:
-        await send_message(text, reply_markup=keyboard)
+        # Harcamanın sahibine gider — kimin bildirimi kimin telefonuna düştüyse ona.
+        await send_message(text, chat_id=sahibin_chati(candidate["owner_id"]), reply_markup=keyboard)
     except Exception as e:
         log.warning(f"⚠️  Çift kayıt bildirimi gönderilemedi: {e}")
 
 
 async def _notify_telegram(expense: Dict[str, Any], alert: Optional[str]):
     """Kaydedilen harcamayı Telegram'dan bildirir — düzeltme butonlarıyla."""
-    from telegram_bot import send_message
+    from telegram_bot import send_message, sahibin_chati
 
     try:
         await send_message(
             format_expense_message(expense, alert),
+            chat_id=sahibin_chati(expense["owner_id"]),
             reply_markup=expense_keyboard(expense["id"]),
         )
     except Exception as e:

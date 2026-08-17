@@ -69,15 +69,23 @@ def delete_old_conversations(days: int = 30) -> int:
 
 def init_db():
     """Tüm modül tablolarını oluşturur"""
+    from modules.auth.models import create_users_table
     from modules.reminders.models import create_reminders_table
     from modules.notes.models import create_notes_table
     from modules.expenses.models import create_expenses_table, create_budgets_table
 
     with get_db() as conn:
+        # Önce kullanıcılar: veri tablolarının owner_id göçü buradaki id'ye atıyor.
+        create_users_table(conn)
         create_reminders_table(conn)
         create_notes_table(conn)
         create_expenses_table(conn)
         create_budgets_table(conn)
+        # conversations'a owner_id EKLENMİYOR — bilerek. Bu tablo yalnızca
+        # get_recent_messages() tarafından, yalnızca Groq'a bağlam vermek için
+        # okunuyor ve zaten chat_id'ye göre süzülüyor. İki kişinin chat_id'si
+        # farklı olduğundan bağlamlar en baştan ayrı. Kullanılmayan bir sütun
+        # eklemek yerine ayrımın chat_id'de olduğunu burada yazmak daha doğru.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,

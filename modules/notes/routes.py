@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
+from auth import verify_api_key
 from database import get_db
 from modules.notes import service
+from yetki import bakilan_sahip, yazma_izni
 
 router = APIRouter(prefix="/api/notes", tags=["notes"])
 
@@ -21,18 +23,20 @@ class NoteUpdate(BaseModel):
 
 
 @router.post("/")
-def create_note(data: NoteCreate):
+def create_note(data: NoteCreate, user: dict = Depends(verify_api_key)):
     with get_db() as conn:
-        return service.create_note(conn, data.title, data.content, data.category)
+        return service.create_note(conn, user["id"], data.title, data.content, data.category)
 
 
 @router.get("/search")
 def search_notes(
     q: str = Query(..., description="Arama terimi"),
     category: Optional[str] = None,
+    kisi: Optional[int] = Query(None, description="Kimin notlarında aransın (boşsa kendi)"),
+    user: dict = Depends(verify_api_key),
 ):
     with get_db() as conn:
-        return service.search_notes(conn, q, category)
+        return service.search_notes(conn, bakilan_sahip(user, kisi), q, category)
 
 
 @router.get("/")
@@ -40,13 +44,18 @@ def list_notes(
     category: Optional[str] = None,
     limit: int = Query(500, ge=1, le=2000),
     offset: int = Query(0, ge=0),
+    kisi: Optional[int] = Query(None, description="Kimin notları (boşsa kendi)"),
+    user: dict = Depends(verify_api_key),
 ):
     with get_db() as conn:
-        return service.list_notes(conn, category, limit=limit, offset=offset)
+        return service.list_notes(
+            conn, bakilan_sahip(user, kisi), category, limit=limit, offset=offset
+        )
 
 
 @router.get("/{note_id}")
-def get_note(note_id: int):
+def get_note(note_id: int, user: dict = Depends(verify_api_key)):
+    """Okuma serbest — sahiplik kontrolü yok, ikiniz de birbirinizin notunu açabiliyorsunuz."""
     with get_db() as conn:
         result = service.get_note_by_id(conn, note_id)
     if not result:
@@ -55,17 +64,17 @@ def get_note(note_id: int):
 
 
 @router.put("/{note_id}")
-def update_note(note_id: int, data: NoteUpdate):
+def update_note(note_id: int, data: NoteUpdate, user: dict = Depends(verify_api_key)):
     with get_db() as conn:
-        if not service.get_note_by_id(conn, note_id):
-            raise HTTPException(status_code=404, detail="Not bulunamadı")
-        return service.update_note(conn, note_id, data.title, data.content, data.category)
+        yazma_izni(service.get_note_by_id(conn, note_id), user, "Not")
+        return service.update_note(
+            conn, user["id"], note_id, data.title, data.content, data.category
+        )
 
 
 @router.delete("/{note_id}")
-def delete_note(note_id: int):
+def delete_note(note_id: int, user: dict = Depends(verify_api_key)):
     with get_db() as conn:
-        success = service.delete_note(conn, note_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Not bulunamadı")
+        yazma_izni(service.get_note_by_id(conn, note_id), user, "Not")
+        service.delete_note(conn, user["id"], note_id)
     return {"message": "Not silindi"}

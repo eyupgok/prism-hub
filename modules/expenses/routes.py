@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
+from auth import verify_api_key
 from database import get_db
 from modules.expenses import service
+from yetki import bakilan_sahip, yazma_izni
 
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
 
@@ -16,21 +18,25 @@ class ExpenseCreate(BaseModel):
 
 
 @router.post("/")
-def create_expense(data: ExpenseCreate):
+def create_expense(data: ExpenseCreate, user: dict = Depends(verify_api_key)):
     # Negatif tutar geçerlidir — iade demektir. Sadece sıfır ve saçma büyüklükler reddedilir.
     try:
         with get_db() as conn:
             return service.create_expense(
-                conn, data.amount, data.category, data.description, data.expense_date
+                conn, user["id"], data.amount, data.category, data.description, data.expense_date
             )
     except service.InvalidAmount as e:
         raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.get("/summary")
-def get_summary(month: Optional[str] = None):
+def get_summary(
+    month: Optional[str] = None,
+    kisi: Optional[int] = Query(None, description="Kimin özeti (boşsa kendi)"),
+    user: dict = Depends(verify_api_key),
+):
     with get_db() as conn:
-        return service.get_monthly_summary(conn, month)
+        return service.get_monthly_summary(conn, bakilan_sahip(user, kisi), month)
 
 
 @router.get("/")
@@ -39,11 +45,15 @@ def list_expenses(
     category: Optional[str] = None,
     limit: int = Query(500, ge=1, le=2000),
     offset: int = Query(0, ge=0),
+    kisi: Optional[int] = Query(None, description="Kimin harcamaları (boşsa kendi)"),
+    user: dict = Depends(verify_api_key),
 ):
     """Varsayılan 500 kayıtla sınırlı — yıllar geçtikçe panel her açılışta
     tüm geçmişi indirmesin. Daha fazlası için offset ile sayfalayın."""
     with get_db() as conn:
-        return service.list_expenses(conn, month, category, limit=limit, offset=offset)
+        return service.list_expenses(
+            conn, bakilan_sahip(user, kisi), month, category, limit=limit, offset=offset
+        )
 
 
 class NotificationIngest(BaseModel):
@@ -56,11 +66,15 @@ class NotificationIngest(BaseModel):
 
 
 @router.post("/ingest")
-async def ingest_notification(data: NotificationIngest):
+async def ingest_notification(data: NotificationIngest, user: dict = Depends(verify_api_key)):
     """Banka bildirimini çözümleyip harcamaysa kaydeder.
 
     Harcama değilse (bakiye, iade, şifre mesajı vb.) 200 döner ama kayıt açmaz —
     telefon tarafı bunu hata saymamalı, tekrar denememeli.
+
+    Harcama, isteği yapan anahtarın sahibine yazılır. `X-API-Key` şu an tek bir
+    değer ve 1 numaralı kullanıcıya bağlı (bkz. auth.verify_api_key) — ikinci bir
+    Android kullanıcısı olursa anahtarların kullanıcı başına ayrılması gerekir.
     """
     from modules.expenses.ingest import ingest_notification as run_ingest
 
@@ -68,6 +82,7 @@ async def ingest_notification(data: NotificationIngest):
         raise HTTPException(status_code=422, detail="source 'notification' veya 'sms' olmalı")
 
     return await run_ingest(
+        owner_id=user["id"],
         package_name=data.package_name,
         title=data.title,
         text=data.text,
@@ -77,11 +92,10 @@ async def ingest_notification(data: NotificationIngest):
 
 
 @router.delete("/{expense_id}")
-def delete_expense(expense_id: int):
+def delete_expense(expense_id: int, user: dict = Depends(verify_api_key)):
     with get_db() as conn:
-        success = service.delete_expense(conn, expense_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Harcama bulunamadı")
+        yazma_izni(service.get_expense_by_id(conn, expense_id), user, "Harcama")
+        service.delete_expense(conn, user["id"], expense_id)
     return {"message": "Harcama silindi"}
 
 
@@ -96,19 +110,23 @@ class BudgetSet(BaseModel):
 
 
 @budget_router.get("/")
-def list_budgets():
+def list_budgets(
+    kisi: Optional[int] = Query(None, description="Kimin bütçeleri (boşsa kendi)"),
+    user: dict = Depends(verify_api_key),
+):
     """Tüm bütçe limitlerini, bu ayki harcama ve uyarı durumuyla döner"""
+    sahip = bakilan_sahip(user, kisi)
     with get_db() as conn:
-        budgets = service.get_all_budgets(conn)
-        summary = service.get_monthly_summary(conn)
+        budgets = service.get_all_budgets(conn, sahip)
+        summary = service.get_monthly_summary(conn, sahip)
         for b in budgets:
             b["current_spent"] = summary["by_category"].get(b["category"], 0)
-            b["alert"] = service.check_budget_alert(conn, b["category"])
+            b["alert"] = service.check_budget_alert(conn, sahip, b["category"])
         return budgets
 
 
 @budget_router.put("/")
-def set_budget(data: BudgetSet):
+def set_budget(data: BudgetSet, user: dict = Depends(verify_api_key)):
     if data.category not in service.VALID_CATEGORIES:
         raise HTTPException(
             status_code=422,
@@ -117,13 +135,15 @@ def set_budget(data: BudgetSet):
     if data.monthly_limit <= 0:
         raise HTTPException(status_code=422, detail="Limit 0'dan büyük olmalı")
     with get_db() as conn:
-        return service.set_budget(conn, data.category, data.monthly_limit)
+        return service.set_budget(conn, user["id"], data.category, data.monthly_limit)
 
 
 @budget_router.delete("/{category}")
-def delete_budget(category: str):
+def delete_budget(category: str, user: dict = Depends(verify_api_key)):
+    """Bütçe kategoriye göre siliniyor, id'ye göre değil — dolayısıyla sahiplik
+    kontrolü ayrı bir sorguya gerek kalmadan WHERE'in içinde."""
     with get_db() as conn:
-        success = service.delete_budget(conn, category)
+        success = service.delete_budget(conn, user["id"], category)
     if not success:
         raise HTTPException(status_code=404, detail="Kategori bulunamadı")
     return {"message": "Bütçe limiti kaldırıldı"}

@@ -19,6 +19,19 @@ def _api_url(method: str) -> str:
     return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
 
 
+def sahibin_chati(owner_id: int) -> Optional[str]:
+    """Bir kaydın sahibinin Telegram sohbeti.
+
+    Hatırlatıcı bildirimi, harcama haberi, özet — hepsi kaydın sahibine gider.
+    Kişi henüz bota /start dememişse chat_id'si boş olur ve None döner;
+    `send_message` o zaman TELEGRAM_CHAT_ID'e düşer, yani haber kaybolmaz.
+    """
+    from auth import kullanici_getir
+
+    k = kullanici_getir(owner_id)
+    return k["telegram_chat_id"] if k else None
+
+
 router = APIRouter()
 
 
@@ -98,9 +111,14 @@ async def send_document(
 
 
 async def send_reminder_notification(reminder: Dict[str, Any]):
+    """Hatırlatıcıyı SAHİBİNİN sohbetine yollar — herkes kendi görevini görür."""
     from modules.reminders.service import format_reminder_notification
     text, keyboard = format_reminder_notification(reminder)
-    await send_message(text, reply_markup={"inline_keyboard": keyboard})
+    await send_message(
+        text,
+        chat_id=sahibin_chati(reminder["owner_id"]),
+        reply_markup={"inline_keyboard": keyboard},
+    )
 
 
 async def set_webhook(webhook_url: str):
@@ -173,12 +191,21 @@ async def _process_update(update: Dict[str, Any]):
 
 
 async def _handle_message(message: Dict[str, Any]):
+    from auth import kullanici_chat_id_ile
+
     chat_id = str(message["chat"]["id"])
 
-    # Güvenlik: yalnızca yetkili kullanıcı
-    if TELEGRAM_CHAT_ID and chat_id != TELEGRAM_CHAT_ID:
+    # Güvenlik: chat_id `users` tablosunda kayıtlı olmalı. Tek bir env değeri
+    # yerine tablo bakılıyor — ikinci kişiyi eklemek `kullanici.py chat-id` ile
+    # oluyor, kod ya da .env değişmiyor.
+    kullanici = kullanici_chat_id_ile(chat_id)
+    if not kullanici:
+        # chat_id'yi loga basıyoruz: yeni birini eklerken numarasını buradan alıyorsun.
+        log.warning("Yetkisiz chat: %s", chat_id)
         await send_message("⛔ Yetkisiz erişim.", chat_id=chat_id)
         return
+
+    owner_id = kullanici["id"]
 
     text = message.get("text", "").strip()
     voice = message.get("voice")
@@ -207,7 +234,7 @@ async def _handle_message(message: Dict[str, Any]):
     if text == "/hava":
         from modules.weather import service as weather_svc
         try:
-            weather = await weather_svc.get_weather()
+            weather = await weather_svc.get_weather(kullanici)
             await send_message(weather_svc.format_weather_message(weather), chat_id=chat_id)
         except Exception as e:
             await send_message(f"❌ Hava durumu alınamadı: {e}", chat_id=chat_id)
@@ -216,7 +243,7 @@ async def _handle_message(message: Dict[str, Any]):
     if text == "/ozet":
         from modules.summary import service as summary_svc
         try:
-            await send_message(await summary_svc.get_morning_summary(), chat_id=chat_id)
+            await send_message(await summary_svc.get_morning_summary(owner_id), chat_id=chat_id)
         except Exception as e:
             await send_message(f"❌ Özet alınamadı: {e}", chat_id=chat_id)
         return
@@ -225,7 +252,7 @@ async def _handle_message(message: Dict[str, Any]):
         from database import get_db
         from modules.reminders import service as svc
         with get_db() as conn:
-            reminders = svc.list_reminders(conn, False)
+            reminders = svc.list_reminders(conn, owner_id, False)
         if not reminders:
             await send_message("📋 Aktif hatırlatıcı yok.", chat_id=chat_id)
         else:
@@ -242,7 +269,7 @@ async def _handle_message(message: Dict[str, Any]):
         from database import get_db
         from modules.notes import service as svc
         with get_db() as conn:
-            notes = svc.list_notes(conn)[:10]
+            notes = svc.list_notes(conn, owner_id)[:10]
         if not notes:
             await send_message("📝 Henüz not yok.", chat_id=chat_id)
         else:
@@ -259,7 +286,7 @@ async def _handle_message(message: Dict[str, Any]):
                 summary_svc.get_evening_summary if text == "/aksam"
                 else summary_svc.get_weekly_report
             )
-            await send_message(await builder(), chat_id=chat_id)
+            await send_message(await builder(owner_id), chat_id=chat_id)
         except Exception:
             log.exception("Özet oluşturulamadı (%s)", text)
             await send_message("❌ Özet oluşturulamadı, kayıtlara baktım.", chat_id=chat_id)
@@ -282,7 +309,7 @@ async def _handle_message(message: Dict[str, Any]):
         from datetime import datetime
         import pytz
         with get_db() as conn:
-            budgets = svc.get_all_budgets(conn)
+            budgets = svc.get_all_budgets(conn, owner_id)
             month = datetime.now(pytz.timezone("Europe/Istanbul")).strftime("%Y-%m")
             if not budgets:
                 await send_message(
@@ -292,7 +319,7 @@ async def _handle_message(message: Dict[str, Any]):
             else:
                 lines = ["📊 <b>Aylık Bütçe Limitleri:</b>\n"]
                 for b in budgets:
-                    alert = svc.check_budget_alert(conn, b["category"], month)
+                    alert = svc.check_budget_alert(conn, owner_id, b["category"], month)
                     status = "🚨" if alert and "aşıldı" in alert else ("⚠️" if alert else "✅")
                     lines.append(f"{status} {b['category']}: {b['monthly_limit']:.0f} TL/ay")
                 await send_message("\n".join(lines), chat_id=chat_id)
@@ -335,7 +362,7 @@ async def _handle_message(message: Dict[str, Any]):
         processing_id = processing.get("result", {}).get("message_id") if processing.get("ok") else None
 
     from ai_router import route_message
-    response_text = await route_message(text, chat_id)
+    response_text = await route_message(text, chat_id, owner_id)
 
     if processing_id:
         await edit_message(chat_id, processing_id, response_text)
@@ -349,12 +376,17 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
     message_id = callback_query["message"]["message_id"]
     data = callback_query.get("data", "")
 
-    # Güvenlik: mesajlarda olduğu gibi butonlarda da sadece yetkili kullanıcı.
+    # Güvenlik: mesajlarda olduğu gibi butonlarda da sadece kayıtlı kullanıcı.
     # Butonlar doğrudan silme/değiştirme yapıyor, bu kontrolün eksik olması
     # _handle_message ile asimetri yaratıyordu.
-    if TELEGRAM_CHAT_ID and chat_id != TELEGRAM_CHAT_ID:
+    from auth import kullanici_chat_id_ile
+
+    kullanici = kullanici_chat_id_ile(chat_id)
+    if not kullanici:
         await answer_callback_query(cb_id, "⛔ Yetkisiz")
         return
+
+    owner_id = kullanici["id"]
 
     from database import get_db
     from modules.reminders import service as svc
@@ -363,7 +395,7 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
         if data.startswith("complete_"):
             reminder_id = int(data.split("_")[1])
             with get_db() as conn:
-                r = svc.complete_reminder(conn, reminder_id)
+                r = svc.complete_reminder(conn, owner_id, reminder_id)
 
             if r:
                 await answer_callback_query(cb_id, "✅ Tamamlandı!")
@@ -388,7 +420,7 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
             reminder_id = int(reminder_id_str)
 
             with get_db() as conn:
-                r = svc.snooze_reminder(conn, reminder_id, minutes)
+                r = svc.snooze_reminder(conn, owner_id, reminder_id, minutes)
 
             if r:
                 due = svc.parse_dt(r["due_datetime"])
@@ -429,7 +461,7 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
                 }
                 delete_fn, label = deleters[pending["kind"]]
                 with get_db() as conn:
-                    deleted = delete_fn(conn, pending["id"])
+                    deleted = delete_fn(conn, owner_id, pending["id"])
 
                 if deleted:
                     await answer_callback_query(cb_id, "🗑 Silindi")
@@ -444,7 +476,7 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
 
             expense_id = int(data.split("_")[1])
             with get_db() as conn:
-                deleted = exp_svc.delete_expense(conn, expense_id)
+                deleted = exp_svc.delete_expense(conn, owner_id, expense_id)
 
             if deleted:
                 await answer_callback_query(cb_id, "🗑 Silindi")
@@ -468,7 +500,7 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
             else:
                 expense = save_remembered_duplicate(candidate)
                 with get_db() as conn:
-                    alert = exp_svc.check_budget_alert(conn, expense["category"])
+                    alert = exp_svc.check_budget_alert(conn, owner_id, expense["category"])
                 await answer_callback_query(cb_id, "➕ Kaydedildi")
                 await edit_message(
                     chat_id, message_id,
@@ -496,8 +528,8 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
             category = CATEGORY_ORDER[int(index_str)]
 
             with get_db() as conn:
-                expense = exp_svc.update_expense_category(conn, expense_id, category)
-                alert = exp_svc.check_budget_alert(conn, category) if expense else None
+                expense = exp_svc.update_expense_category(conn, owner_id, expense_id, category)
+                alert = exp_svc.check_budget_alert(conn, owner_id, category) if expense else None
 
             if expense:
                 await answer_callback_query(cb_id, f"🏷 {category}")

@@ -1,5 +1,7 @@
 import sqlite3
 
+from modules.auth.models import sahiplik_sutunu_ekle
+
 
 def create_notes_table(conn: sqlite3.Connection):
     """Notlar tablosunu oluşturur"""
@@ -12,3 +14,9 @@ def create_notes_table(conn: sqlite3.Connection):
             created_at  TEXT    NOT NULL
         )
     """)
+    _migrate_notes(conn)
+
+
+def _migrate_notes(conn: sqlite3.Connection):
+    """Eski veritabanlarına sonradan eklenen sütunları ekler (idempotent)."""
+    sahiplik_sutunu_ekle(conn, "notes")

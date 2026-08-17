@@ -84,6 +84,7 @@ def get_notification_interval(priority: int, minutes_remaining: float) -> Option
 
 def create_reminder(
     conn: sqlite3.Connection,
+    owner_id: int,
     title: str,
     due_datetime: str,
     priority: int = 3,
@@ -91,19 +92,40 @@ def create_reminder(
 ) -> Dict[str, Any]:
     dt = parse_dt(due_datetime)
     cursor = conn.execute(
-        "INSERT INTO reminders (title, due_datetime, priority, recurrence, created_at) VALUES (?, ?, ?, ?, ?)",
-        (title, dt.isoformat(), normalize_priority(priority), normalize_recurrence(recurrence),
-         now_local().isoformat()),
+        "INSERT INTO reminders (owner_id, title, due_datetime, priority, recurrence, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (owner_id, title, dt.isoformat(), normalize_priority(priority),
+         normalize_recurrence(recurrence), now_local().isoformat()),
     )
     return get_reminder_by_id(conn, cursor.lastrowid)
 
 
 def get_reminder_by_id(conn: sqlite3.Connection, reminder_id: int) -> Optional[Dict[str, Any]]:
+    """Sahibine bakmadan getirir — sahiplik kontrolünü rota yapar, böylece
+    'yok' (404) ile 'senin değil' (403) ayrı ayrı cevaplanabiliyor."""
     row = conn.execute("SELECT * FROM reminders WHERE id = ?", (reminder_id,)).fetchone()
     return dict(row) if row else None
 
 
-def list_reminders(conn: sqlite3.Connection, include_completed: bool = False) -> List[Dict[str, Any]]:
+def list_reminders(
+    conn: sqlite3.Connection, owner_id: int, include_completed: bool = False
+) -> List[Dict[str, Any]]:
+    query = "SELECT * FROM reminders WHERE owner_id = ?"
+    if not include_completed:
+        query += " AND is_completed = 0"
+    query += " ORDER BY due_datetime ASC"
+    return [dict(r) for r in conn.execute(query, (owner_id,)).fetchall()]
+
+
+def tum_hatirlaticilar(
+    conn: sqlite3.Connection, include_completed: bool = False
+) -> List[Dict[str, Any]]:
+    """SAHİPTEN BAĞIMSIZ liste — yalnız zamanlayıcı için.
+
+    Bildirim döngüsünün herkesin hatırlatıcısına bakması, sonra her birini
+    sahibinin Telegram'ına yollaması gerekiyor. Kullanıcıya açılan uçlar
+    bunu değil `list_reminders`'ı kullanır.
+    """
     query = "SELECT * FROM reminders"
     if not include_completed:
         query += " WHERE is_completed = 0"
@@ -111,9 +133,11 @@ def list_reminders(conn: sqlite3.Connection, include_completed: bool = False) ->
     return [dict(r) for r in conn.execute(query).fetchall()]
 
 
-def complete_reminder(conn: sqlite3.Connection, reminder_id: int) -> Optional[Dict[str, Any]]:
+def complete_reminder(
+    conn: sqlite3.Connection, owner_id: int, reminder_id: int
+) -> Optional[Dict[str, Any]]:
     r = get_reminder_by_id(conn, reminder_id)
-    if not r:
+    if not r or r["owner_id"] != owner_id:
         return None
     # Tekrarlayan hatırlatıcı tamamlanınca ölmez, bir sonraki periyoda geçer
     if r.get("recurrence", "none") != "none":
@@ -122,40 +146,46 @@ def complete_reminder(conn: sqlite3.Connection, reminder_id: int) -> Optional[Di
             updated["rescheduled"] = True
             return updated
     conn.execute(
-        "UPDATE reminders SET is_completed = 1, completed_at = ? WHERE id = ?",
-        (now_local().isoformat(), reminder_id),
+        "UPDATE reminders SET is_completed = 1, completed_at = ? WHERE id = ? AND owner_id = ?",
+        (now_local().isoformat(), reminder_id, owner_id),
     )
     return get_reminder_by_id(conn, reminder_id)
 
 
-def count_completed_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> int:
+def count_completed_between(
+    conn: sqlite3.Connection, owner_id: int, start: datetime, end: datetime
+) -> int:
     """İki an arasında tamamlanan görev sayısı (akşam özeti ve haftalık rapor için)."""
     row = conn.execute(
-        "SELECT COUNT(*) c FROM reminders WHERE completed_at >= ? AND completed_at < ?",
-        (start.isoformat(), end.isoformat()),
+        "SELECT COUNT(*) c FROM reminders "
+        "WHERE owner_id = ? AND completed_at >= ? AND completed_at < ?",
+        (owner_id, start.isoformat(), end.isoformat()),
     ).fetchone()
     return row["c"]
 
 
 def list_due_between(
-    conn: sqlite3.Connection, start: datetime, end: datetime
+    conn: sqlite3.Connection, owner_id: int, start: datetime, end: datetime
 ) -> List[Dict[str, Any]]:
     """Belirtilen aralıkta vadesi olan, tamamlanmamış hatırlatıcılar."""
     result = []
-    for r in list_reminders(conn, include_completed=False):
+    for r in list_reminders(conn, owner_id, include_completed=False):
         due = parse_dt(r["due_datetime"])
         if start <= due < end:
             result.append(r)
     return result
 
 
-def delete_reminder(conn: sqlite3.Connection, reminder_id: int) -> bool:
-    cursor = conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+def delete_reminder(conn: sqlite3.Connection, owner_id: int, reminder_id: int) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM reminders WHERE id = ? AND owner_id = ?", (reminder_id, owner_id)
+    )
     return cursor.rowcount > 0
 
 
 def update_reminder(
     conn: sqlite3.Connection,
+    owner_id: int,
     reminder_id: int,
     title: str = None,
     due_datetime: str = None,
@@ -180,8 +210,12 @@ def update_reminder(
         values.append(normalize_recurrence(recurrence))
     if not fields:
         return get_reminder_by_id(conn, reminder_id)
-    values.append(reminder_id)
-    conn.execute(f"UPDATE reminders SET {', '.join(fields)} WHERE id = ?", values)
+    values.extend([reminder_id, owner_id])
+    cursor = conn.execute(
+        f"UPDATE reminders SET {', '.join(fields)} WHERE id = ? AND owner_id = ?", values
+    )
+    if cursor.rowcount == 0:
+        return None          # yok ya da başkasının
     return get_reminder_by_id(conn, reminder_id)
 
 
@@ -191,15 +225,18 @@ MIN_SNOOZE_MINUTES = 1
 MAX_SNOOZE_MINUTES = 7 * 24 * 60
 
 
-def snooze_reminder(conn: sqlite3.Connection, reminder_id: int, minutes: int) -> Optional[Dict[str, Any]]:
+def snooze_reminder(
+    conn: sqlite3.Connection, owner_id: int, reminder_id: int, minutes: int
+) -> Optional[Dict[str, Any]]:
     reminder = get_reminder_by_id(conn, reminder_id)
-    if not reminder:
+    if not reminder or reminder["owner_id"] != owner_id:
         return None
     minutes = max(MIN_SNOOZE_MINUTES, min(int(minutes), MAX_SNOOZE_MINUTES))
     new_due = now_local() + timedelta(minutes=minutes)
     conn.execute(
-        "UPDATE reminders SET due_datetime = ?, snooze_count = snooze_count + 1, last_notified_at = NULL WHERE id = ?",
-        (new_due.isoformat(), reminder_id),
+        "UPDATE reminders SET due_datetime = ?, snooze_count = snooze_count + 1, "
+        "last_notified_at = NULL WHERE id = ? AND owner_id = ?",
+        (new_due.isoformat(), reminder_id, owner_id),
     )
     return get_reminder_by_id(conn, reminder_id)
 
@@ -259,7 +296,7 @@ def reschedule_overdue_recurring(conn: sqlite3.Connection, older_than_minutes: i
     cutoff = now_local() - timedelta(minutes=older_than_minutes)
     moved = 0
 
-    for r in list_reminders(conn, include_completed=False):
+    for r in tum_hatirlaticilar(conn, include_completed=False):   # herkesinki süpürülür
         if r.get("recurrence", "none") == "none":
             continue
         if parse_dt(r["due_datetime"]) >= cutoff:
@@ -278,10 +315,12 @@ def update_last_notified(conn: sqlite3.Connection, reminder_id: int):
 
 
 def get_reminders_to_notify(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    """Bildirilecek hatırlatıcılar — HERKESİNKİ. Dönen her kayıtta `owner_id` var;
+    zamanlayıcı ona bakıp bildirimi doğru kişinin Telegram'ına yolluyor."""
     now = now_local()
     to_notify = []
 
-    for r in list_reminders(conn, include_completed=False):
+    for r in tum_hatirlaticilar(conn, include_completed=False):
         due = parse_dt(r["due_datetime"])
         minutes_remaining = (due - now).total_seconds() / 60
 

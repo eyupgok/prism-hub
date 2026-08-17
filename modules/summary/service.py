@@ -25,8 +25,12 @@ def _money(value: float) -> str:
     return f"{value:,.0f}".replace(",", ".")
 
 
-async def get_morning_summary() -> str:
-    """Hava, görev, harcama ve notları birleştirerek günlük özet oluşturur"""
+async def get_morning_summary(owner_id: int) -> str:
+    """Hava, görev, harcama ve notları birleştirerek günlük özet oluşturur.
+
+    Özetler kişiye özel: zamanlayıcı her kullanıcı için ayrı ayrı üretip
+    herkesin kendi Telegram'ına gönderiyor.
+    """
     from database import get_db
     from modules.reminders import service as reminder_svc
     from modules.notes import service as notes_svc
@@ -41,7 +45,9 @@ async def get_morning_summary() -> str:
 
     # --- Hava durumu ---
     try:
-        weather = await weather_svc.get_weather()
+        from auth import kullanici_getir
+
+        weather = await weather_svc.get_weather(kullanici_getir(owner_id))
         emoji = weather_svc.get_weather_emoji(weather["weather_code"])
         lines.append(
             f"{emoji} Hava: {weather['city']} {weather['temperature']}°C, {weather['description']}"
@@ -51,7 +57,7 @@ async def get_morning_summary() -> str:
 
     # --- Bugünkü görevler ---
     with get_db() as conn:
-        all_reminders = reminder_svc.list_reminders(conn, include_completed=False)
+        all_reminders = reminder_svc.list_reminders(conn, owner_id, include_completed=False)
 
     today_tasks = []
     for r in all_reminders:
@@ -70,7 +76,7 @@ async def get_morning_summary() -> str:
 
     # --- Aylık harcama özeti ---
     with get_db() as conn:
-        summary = expenses_svc.get_monthly_summary(conn, month_str)
+        summary = expenses_svc.get_monthly_summary(conn, owner_id, month_str)
 
     lines.append(f"\n💰 Bu ay toplam {summary['total']:.0f} TL harcandı")
     if summary["by_category"]:
@@ -80,7 +86,7 @@ async def get_morning_summary() -> str:
 
     # --- Son notlar ---
     with get_db() as conn:
-        recent_notes = notes_svc.list_notes(conn)[:3]
+        recent_notes = notes_svc.list_notes(conn, owner_id)[:3]
 
     if recent_notes:
         lines.append("\n📝 Son notlar:")
@@ -90,7 +96,7 @@ async def get_morning_summary() -> str:
     return "\n".join(lines)
 
 
-async def get_evening_summary() -> str:
+async def get_evening_summary(owner_id: int) -> str:
     """Akşam 21:00 özeti: bugün ne yaptın, yarın seni ne bekliyor."""
     from database import get_db
     from modules.expenses import service as expenses_svc
@@ -102,10 +108,12 @@ async def get_evening_summary() -> str:
     today_str = now.strftime("%Y-%m-%d")
 
     with get_db() as conn:
-        completed = reminder_svc.count_completed_between(conn, today_start, tomorrow_start)
-        remaining = reminder_svc.list_due_between(conn, today_start, tomorrow_start)
-        tomorrow = reminder_svc.list_due_between(conn, tomorrow_start, day_after)
-        todays_expenses = expenses_svc.list_expenses(conn, since=today_str, until=None, month=today_str[:7])
+        completed = reminder_svc.count_completed_between(conn, owner_id, today_start, tomorrow_start)
+        remaining = reminder_svc.list_due_between(conn, owner_id, today_start, tomorrow_start)
+        tomorrow = reminder_svc.list_due_between(conn, owner_id, tomorrow_start, day_after)
+        todays_expenses = expenses_svc.list_expenses(
+            conn, owner_id, since=today_str, until=None, month=today_str[:7]
+        )
         todays_expenses = [e for e in todays_expenses if e["expense_date"] == today_str]
 
     spent = sum(e["amount"] for e in todays_expenses)
@@ -144,7 +152,7 @@ async def get_evening_summary() -> str:
     return "\n".join(lines)
 
 
-async def get_weekly_report() -> str:
+async def get_weekly_report(owner_id: int) -> str:
     """Pazar akşamı haftalık rapor: görev ve harcama karnesi, geçen haftayla kıyas."""
     from database import get_db
     from modules.expenses import service as expenses_svc
@@ -156,11 +164,12 @@ async def get_weekly_report() -> str:
     prev_week_start = week_start - timedelta(days=7)
 
     with get_db() as conn:
-        completed = reminder_svc.count_completed_between(conn, week_start, tomorrow_start)
-        prev_completed = reminder_svc.count_completed_between(conn, prev_week_start, week_start)
+        completed = reminder_svc.count_completed_between(conn, owner_id, week_start, tomorrow_start)
+        prev_completed = reminder_svc.count_completed_between(conn, owner_id, prev_week_start, week_start)
         # Sadece iki haftalık aralık çekiliyor — tüm geçmişi okumaya gerek yok
         all_expenses = expenses_svc.list_expenses(
             conn,
+            owner_id,
             since=prev_week_start.strftime("%Y-%m-%d"),
             until=tomorrow_start.strftime("%Y-%m-%d"),
         )

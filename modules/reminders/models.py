@@ -1,5 +1,7 @@
 import sqlite3
 
+from modules.auth.models import sahiplik_sutunu_ekle
+
 
 def create_reminders_table(conn: sqlite3.Connection):
     conn.execute("""
@@ -30,3 +32,5 @@ def _migrate_reminders(conn: sqlite3.Connection):
         # sorulara cevap verebilmek için gerekli. Sadece is_completed=1 bilgisi
         # ne zaman olduğunu söylemiyor.
         conn.execute("ALTER TABLE reminders ADD COLUMN completed_at TEXT")
+
+    sahiplik_sutunu_ekle(conn, "reminders")
