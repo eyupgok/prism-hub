@@ -8,6 +8,7 @@ Parola ve chat_id koda ya da .env'e yazılmasın diye ayrı bir komut. Sunucuda:
     python kullanici.py ekle "Zeynep" --chat-id 123456789
     python kullanici.py parola "Zeynep"
     python kullanici.py chat-id "Zeynep" 123456789
+    python kullanici.py ad "Zeynep" "Zeynep"
 
 Parola sorulurken ekrana yazılmaz (getpass). Karma olarak saklanır, geri okunamaz —
 unutulursa `parola` komutuyla yenisi konur.
@@ -80,6 +81,32 @@ def parola_degistir(ad: str):
     print(f"'{ad}' parolası değiştirildi. Açık oturumları etkilemez.")
 
 
+def ad_degistir(eski: str, yeni: str):
+    """Kullanıcının görünen adını değiştirir.
+
+    Zararsız bir işlem: kayıtların sahipliği numaraya (`owner_id`) bağlı, oturum
+    bileti de numara taşıyor. Yani ad değişince ne veriler kayboluyor ne de
+    kimse dışarı atılıyor.
+
+    Tek kural benzersizlik: `ad` sütununda UNIQUE yok ama bu araç ve `gecmis.py`
+    kişiyi adıyla buluyor. Aynı ad iki kez olursa "hangisi?" sorusu cevapsız
+    kalır — o yüzden burada engelleniyor.
+    """
+    yeni = yeni.strip()
+    if not yeni:
+        sys.exit("Yeni ad boş olamaz.")
+
+    with get_db() as conn:
+        if not _kullanici_bul(conn, eski):
+            sys.exit(f"'{eski}' bulunamadı.")
+        if eski != yeni and _kullanici_bul(conn, yeni):
+            sys.exit(f"'{yeni}' zaten kullanılıyor, başka bir ad seç.")
+        conn.execute("UPDATE users SET ad = ? WHERE ad = ?", (yeni, eski))
+
+    print(f"'{eski}' → '{yeni}'")
+    print("Panelde sayfayı yenileyince, Telegram'da bir sonraki mesajda görünür.")
+
+
 def chat_id_ata(ad: str, chat_id: str):
     with get_db() as conn:
         if not _kullanici_bul(conn, ad):
@@ -110,6 +137,10 @@ def main():
     p_chat.add_argument("ad")
     p_chat.add_argument("chat_id")
 
+    p_ad = alt.add_parser("ad", help="görünen adı değiştirir")
+    p_ad.add_argument("eski")
+    p_ad.add_argument("yeni")
+
     a = ap.parse_args()
     init_db()   # tablolar yoksa kurulsun, göç eksikse tamamlansın
 
@@ -121,6 +152,8 @@ def main():
         parola_degistir(a.ad)
     elif a.komut == "chat-id":
         chat_id_ata(a.ad, a.chat_id)
+    elif a.komut == "ad":
+        ad_degistir(a.eski, a.yeni)
 
 
 if __name__ == "__main__":

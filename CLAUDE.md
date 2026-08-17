@@ -576,7 +576,12 @@ python kullanici.py listele                       # kim var, chat_id'leri ne
 python kullanici.py ekle "Ad Soyad"               # parolayı ekranda sormaz (getpass)
 python kullanici.py chat-id "Ad Soyad" 123456789  # Telegram'ı bağla
 python kullanici.py parola "Ad Soyad"             # parola unutulursa yenisi
+python kullanici.py ad "Eski Ad" "Yeni Ad"        # görünen adı değiştir
 ```
+
+Ad değiştirmek zararsız: sahiplik `owner_id` (numara) üzerinden, oturum bileti de
+numara taşıyor. Tek kısıt benzersizlik — `ad` sütununda UNIQUE yok ama hem bu araç
+hem `gecmis.py --kisi` kişiyi adıyla buluyor, o yüzden çakışma engelleniyor.
 
 **chat_id nasıl öğrenilir:** kişi bota `/start` yazar → sunucu logunda
 `Yetkisiz chat: <numara>` satırı çıkar (`sudo journalctl -u prism -n 50 | grep Yetkisiz`).
