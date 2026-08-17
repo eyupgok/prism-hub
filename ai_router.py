@@ -18,13 +18,14 @@ def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""))
 
 SYSTEM_PROMPT = """\
-Sen PRISM'sin — Eyüp'ün kişisel AI asistanı. Görevin Eyüp'ün günlük hayatını organize etmek: hatırlatıcılar, notlar, harcamalar, bütçe, hava durumu ve günlük özet.
+Sen PRISM'sin — kişisel AI asistan. Şu an konuştuğun kişinin adı: {ad}.
+Görevin onun günlük hayatını organize etmek: hatırlatıcılar, notlar, harcamalar, bütçe, hava durumu ve günlük özet.
 
-Eyüp Türkçe konuşur. Mesajları analiz et ve SADECE JSON formatında yanıt ver, başka hiçbir şey yazma.
+Kullanıcı Türkçe konuşur. Mesajları analiz et ve SADECE JSON formatında yanıt ver, başka hiçbir şey yazma.
 
 ## KİMLİĞİN
 - Adın PRISM
-- Eyüp'ün kişisel asistanısın
+- Şu an {ad} ile konuşuyorsun; hitap ederken onun adını kullan, başka bir isim uydurma
 - Samimi ama profesyonelsin
 - Türkçe düşün, Türkçe yanıt ver
 
@@ -151,14 +152,20 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 HISTORY_LIMIT = 10
 
 
-async def parse_message(user_message: str, history: List[Dict] = None) -> Dict[str, Any]:
+async def parse_message(
+    user_message: str, history: List[Dict] = None, ad: str = "kullanıcı"
+) -> Dict[str, Any]:
     """Kullanıcı mesajını Groq'a gönderir ve JSON komut olarak döner.
+
+    `ad` yönergeye gömülür: sistem iki kişilik, asistan karşısındakine kendi
+    adıyla hitap etmeli. Eskiden yönergede "Eyüp" sabit yazılıydı ve bot ikinci
+    kullanıcıya da "Selam Eyüp" diyordu.
 
     JSON modu ve model yedeği `groq_client.complete_json()` içinde hallediliyor.
     """
     now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-    system = SYSTEM_PROMPT.format(now=now_str, today=today_str)
+    system = SYSTEM_PROMPT.format(now=now_str, today=today_str, ad=ad)
 
     messages = [{"role": "system", "content": system}]
     if history:
@@ -565,7 +572,7 @@ async def route_message(user_message: str, chat_id: str = "", owner_id: int = No
     bulup geçiriyor, ama REST/panel yolu chat_id ile geliyor. İkisi de bulunamazsa
     istek reddedilir: sahipsiz bir komutun kimin verisine yazacağı belirsizdir.
     """
-    from auth import kullanici_chat_id_ile
+    from auth import kullanici_chat_id_ile, kullanici_getir
     from database import save_message, get_recent_messages
 
     if owner_id is None:
@@ -574,10 +581,15 @@ async def route_message(user_message: str, chat_id: str = "", owner_id: int = No
             log.warning("Sahibi çözülemeyen mesaj yok sayıldı (chat_id=%s)", chat_id)
             return "⛔ Seni tanıyamadım."
         owner_id = k["id"]
+    else:
+        k = kullanici_getir(owner_id)
+
+    # Kayıt silinmiş olabilir; asistan isimsiz konuşsun, çökmesin.
+    ad = (k or {}).get("ad") or "kullanıcı"
 
     try:
         history = get_recent_messages(chat_id, HISTORY_LIMIT) if chat_id else []
-        parsed = await parse_message(user_message, history)
+        parsed = await parse_message(user_message, history, ad)
         response = await dispatch(parsed, owner_id)
 
         if chat_id:
