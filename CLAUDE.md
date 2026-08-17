@@ -3,6 +3,9 @@
 Eyüp'ün kişisel asistan projesi. Telegram üzerinden doğal Türkçe dille kontrol edilir.
 Oracle Cloud Always Free VM'de kendi kendine barındırılan, SQLite tabanlı, modüler FastAPI uygulaması.
 
+**İki kişilik.** Her kaydın bir sahibi var (`owner_id`); ikisi de birbirinin verisini
+görebiliyor ama yalnız kendi kaydını değiştirebiliyor. Ayrıntısı → "İki Kullanıcı" bölümü.
+
 ## Stack
 
 - **Backend:** Python 3.11 + FastAPI
@@ -32,10 +35,19 @@ confirm.py           → Onay bekleyen yıkıcı işlemler (AI ile silme). Belle
                        REST/panel silmeleri bu akıştan geçmez — orada kullanıcı zaten
                        hangi satıra bastığını görüyor.
 auth.py              → İki yollu doğrulama: X-API-Key başlığı (Android) VEYA prism_session
-                       çerezi (web paneli). Oturum bileti HMAC imzalı + son kullanma tarihli,
-                       sunucuda saklanmaz. İmza anahtarı API_KEY'den türetilir — API_KEY
-                       değişirse tüm oturumlar düşer. Parola denemesi 8'de bir 15 dk kilitlenir.
-                       API_KEY boşsa doğrulama tamamen devre dışı (lokal geliştirme).
+                       çerezi (web paneli). `verify_api_key` artık sadece kapı değil,
+                       KİMLİK de döner (dict) — rotalar `user: dict = Depends(...)` yazıyor.
+                       Oturum bileti `<kullanıcı>.<son_kullanma>.<imza>`, HMAC imzalı,
+                       sunucuda saklanmaz; imza anahtarı SESSION_SECRET (yoksa API_KEY).
+                       Parolalar scrypt karması olarak users tablosunda (env'de düz metin
+                       DEĞİL — veritabanı her gece Telegram'a yedekleniyor).
+                       Parola denemesi 8'de bir 15 dk kilitlenir (sayaç GLOBAL — giriş
+                       ekranında isim sorulmadığı için kişiye bağlanamıyor).
+                       API_KEY boşsa doğrulama devre dışı, 1. kullanıcı varsayılır (lokal).
+yetki.py             → Yetki kuralları: `bakilan_sahip()` (GET'te kimin verisi) +
+                       `yazma_izni()` (yazmadan önce sahiplik; yoksa 404, başkasınınsa 403)
+kullanici.py         → Komut satırı aracı: kullanıcı ekle / parola değiştir / chat-id ata.
+                       Parola ve chat_id koda ya da .env'e yazılmasın diye ayrı komut.
 database.py          → SQLite bağlantı, get_db() context manager, konuşma geçmişi + temizlik
 ai_router.py         → Groq NLP parsing, JSON dispatch, route_message(), _esc() HTML escape
 telegram_bot.py      → /webhook (secret token doğrulama + BackgroundTasks), hızlı komutlar,
@@ -47,8 +59,14 @@ Procfile
 
 modules/
   auth/
+    models.py   → CREATE TABLE users + ilk kurulum göçü (env'deki PANEL_PASSWORD ve
+                   TELEGRAM_CHAT_ID'den 1 numaralı kullanıcıyı yaratır) +
+                   sahiplik_sutunu_ekle() — her modülün models.py'si bunu çağırıp
+                   kendi tablosuna owner_id ekliyor
     routes.py   → /api/auth/me, /login, /logout — KORUMASIZ eklenir (main.py),
-                   giriş yapabilmek için giriş yapmış olmak gerekemez
+                   giriş yapabilmek için giriş yapmış olmak gerekemez.
+                   /api/auth/konum ise KORUMALI (kendi Depends'i var): panelin
+                   tarayıcıdan aldığı konumu kişiye yazar
   chat/
     service.py  → Groq Whisper transkripsiyon + describe_image() vision analizi
                    (Telegram + REST ortak kullanır)
@@ -87,15 +105,30 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
                        görmezse işletim sisteminin açık temasıyla çizilir —
                        beyaz zemine beyaz yazı çıkar, seçenekler okunmaz.
                        `select option` kuralları da aynı sorunun Windows yedeği.
-  src/api/client.js  → fetch sarmalayıcı, X-API-Key header (VITE_API_KEY)
-  src/pages/         → Dashboard, Reminders, Notes, Expenses, Settings, Login
+  src/api/client.js  → fetch sarmalayıcı (oturum çerezi ile). `setBakilanKisi(id)`
+                       ile seçilen kişi YALNIZCA GET'lere `?kisi=` olarak eklenir —
+                       yazma her zaman giriş yapanın kendi verisine gider.
+  src/kullanici.jsx  → Bağlam: `kullanici` (giriş yapan) vs `bakilan` (kime bakılıyor).
+                       İkisi farklıysa `saltOkunur` true → arayüz bütün ekle/düzenle/sil
+                       düğmelerini gizler (sunucu zaten 403 döner, bu sadece nezaket)
+  src/pages/         → Dashboard, Reminders, Notes, Expenses, Sohbet, Settings, Login
                        Bütçenin ayrı sayfası YOK — Harcamalar sayfasındaki
                        "Bütçe" sekmesi (components/BudgetPanel.jsx). Limit koymak
                        harcamaya bakarken akla gelen bir iş, menüde ayrı durunca
                        kopuk kalıyordu.
+                       Sohbet.jsx → panelden AI sohbeti (metin + görsel). iPhone'da
+                       Telegram dışında da asistana ulaşılabilsin diye eklendi.
+  src/components/KisiSeridi.jsx
+                     → Üstteki kişi geçişi + salt görüntüleme işareti (göz simgesi).
+                       Tek kullanıcı varsa hiç çizilmez.
   src/components/ErrorBoundary.jsx
                      → Render hatasında beyaz ekran yerine sebebi gösterir
                        (React'te hata sınırı yalnızca sınıf bileşeniyle yazılabiliyor)
+  public/manifest.webmanifest + icon-*.png
+                     → Ana ekrana eklenince uygulama gibi açılır (PWA). iPhone'da
+                       Android uygulaması kurulamadığı için "onun uygulaması" bu.
+                       index.html'de `viewport-fit=cover` ŞART — alt gezinmedeki
+                       env(safe-area-inset-bottom) ancak onunla çalışıyor.
 
 mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
   data/SettingsStore.kt      → sunucu URL + API anahtarı + yakalama ayarları (DataStore)
@@ -125,12 +158,20 @@ mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
 ## Veritabanı Tabloları
 
 ```sql
-reminders    (id, title, due_datetime, priority[1-3], is_completed, last_notified_at,
-              snooze_count, recurrence[none|daily|weekly|monthly], created_at)
+users        (id, ad, telegram_chat_id UNIQUE, parola_hash, created_at,
+              sehir, enlem, boylam, konum_at)
+              → parola_hash = `scrypt$<tuz>$<karma>` (auth.py). Düz metin YOK.
+              → telegram_chat_id boşsa o kişi Telegram'dan yazamaz; bildirimleri de
+                gidecek yer bulamayıp TELEGRAM_CHAT_ID'e (Eyüp) düşer
+              → sehir/enlem/boylam NULL olabilir → env'deki WEATHER_* kullanılır
+              → Göç: tablo boşken PANEL_PASSWORD + TELEGRAM_CHAT_ID'den id=1 yaratılır
 
-notes        (id, title, content, category[iş|kişisel|genel|ders|fikir], created_at)
+reminders    (owner_id, id, title, due_datetime, priority[1-3], is_completed,
+              last_notified_at, snooze_count, recurrence[none|daily|weekly|monthly], created_at)
 
-expenses     (id, amount ← NEGATİF = İADE, category[yemek|ulaşım|eğlence|fatura|alışveriş|diğer],
+notes        (owner_id, id, title, content, category[iş|kişisel|genel|ders|fikir], created_at)
+
+expenses     (owner_id, id, amount ← NEGATİF = İADE, category[yemek|ulaşım|eğlence|fatura|alışveriş|diğer],
               description, expense_date, created_at,
               source[manual|notification|sms|receipt], source_hash, source_at)
               → UNIQUE INDEX idx_expenses_source_hash (source_hash) WHERE source_hash IS NOT NULL
@@ -140,17 +181,70 @@ expenses     (id, amount ← NEGATİF = İADE, category[yemek|ulaşım|eğlence|
               → Bu sütunlar sonradan eklendi; models.py:_migrate_expenses() ALTER TABLE ile
                 mevcut veritabanlarına ekler (idempotent, her init_db()'de güvenle çalışır)
 
-budgets      (id, category UNIQUE, monthly_limit, created_at)
+budgets      (owner_id, id, category, monthly_limit, created_at)
+              → UNIQUE artık (owner_id, category) — ikisi de "yemek" limiti koyabilsin
 
 conversations (id, chat_id, role[user|assistant], content, created_at)
               → INDEX: idx_conv_chat(chat_id)
+              → owner_id YOK, bilerek: bu tablo sadece Groq'a bağlam vermek için
+                okunuyor ve zaten chat_id'ye göre süzülüyor. Telegram'da chat_id
+                kişiye özel, panelde `panel:<kullanıcı id>` — bağlamlar en baştan ayrı.
 ```
+
+**owner_id sütunları sonradan eklendi.** `modules/auth/models.py:sahiplik_sutunu_ekle()`
+her tabloya `NOT NULL DEFAULT 1` ile ekler; yani tek kişilik dönemden kalan her kayıt
+Eyüp'e (id=1) geçer. `REFERENCES users(id)` bilerek yazılmadı — SQLite, yabancı anahtar
+açıkken ALTER TABLE ile eklenen REFERENCES'lı sütunun varsayılanının NULL olmasını şart
+koşuyor, bize ise DEFAULT 1 lazımdı. Bütünlüğü uygulama katmanı koruyor: `owner_id`
+her zaman giriş yapmış kullanıcıdan gelir, istekten alınmaz.
+
+## İki Kullanıcı
+
+Tek kural, her yerde aynı: **okuma serbest, yazma yalnız kendi kaydına.**
+İkisi de birbirinin hatırlatıcısını/notunu/harcamasını görebiliyor; değiştirme ve
+silme her zaman giriş yapanın kendi kayıtlarıyla sınırlı (`yetki.py`).
+
+**Kimlik nereden geliyor:**
+
+| Yol | Kim olduğunu ne söylüyor |
+|---|---|
+| Web paneli | `prism_session` çerezindeki kullanıcı numarası (imzalı) |
+| Telegram | `users.telegram_chat_id` → mesajın geldiği sohbet |
+| Android (`X-API-Key`) | tek env değeri, **her zaman 1 numaralı kullanıcı** |
+
+⚠️ `X-API-Key` kullanıcı başına DEĞİL. Android'i yalnız Eyüp kullanıyor (karşı taraf
+iPhone'da, mobil uygulama yok). İkinci bir Android kullanıcısı olursa anahtarların
+`users` tablosuna taşınması gerekir — yoksa banka bildiriminden gelen harcamalar
+yanlış kişiye yazılır.
+
+**Panelde kişi geçişi:** üstteki şerit (`KisiSeridi.jsx`) kime bakıldığını değiştirir;
+seçim `?kisi=<id>` olarak **yalnız GET** isteklerine eklenir. Karşı taraftayken arayüz
+yazma düğmelerini gizler, sunucu da yazmayı 403 ile reddeder. Sayfaya `key={bakilan.id}`
+veriliyor — geçiş yapılınca bileşen baştan kurulup veriyi yeniden çeksin diye.
+
+**Giriş ekranında kullanıcı adı sorulmuyor:** parolanın kendisi kimin girdiğini söylüyor.
+Bunun bedeli, hatalı deneme kilidinin global olması — biri 8 kez yanlış girerse diğeri de
+15 dakika giremez. Üçüncü kişi eklenirse giriş ekranına isim alanı koymak gerekir.
+
+**Bildirimler sahibine gider:** hatırlatıcı, harcama haberi, sabah/akşam/hafta özeti —
+hepsi `telegram_bot.sahibin_chati(owner_id)` ile kaydın sahibinin sohbetine. chat_id'si
+olmayan kişi için `send_message` `TELEGRAM_CHAT_ID`'e düşer, yani haber kaybolmaz.
+Özetler kişi başına ayrı üretilir (`scheduler._herkese_ozet`) ve hata tek kişiyle sınırlı
+kalır — birinin bozuk verisi diğerinin sabah özetini düşürmez.
+
+**Hava durumu kişiye özel:** panel girişte tarayıcıdan konum alıp `/api/auth/konum`'a
+yazar. Şehir adı yalnız kişi gerçekten yer değiştirmişse (>15 km) Nominatim'e sorulur;
+çözülemezse eski ad kalır — hava durumu koordinatla çalıştığı için ada bağlı değil.
+Konum hiç verilmemişse env'deki `WEATHER_*` (Elazığ) kullanılır.
+
+**Yeni kullanıcı eklemek** → `kullanici.py` (Deploy bölümünde adımları var).
 
 ## AI Routing Sistemi
 
 `ai_router.py` — her Telegram mesajı şu pipeline'dan geçer:
 
-1. `route_message(user_message, chat_id)` çağrılır
+1. `route_message(user_message, chat_id, owner_id)` çağrılır — `owner_id`
+   oluşturulan/silinen her kaydın sahibi olur, `chat_id` yalnız konuşma geçmişinin anahtarı
 2. `get_recent_messages(chat_id, limit=10)` → SQLite'tan konuşma geçmişi alınır
 3. `parse_message(user_message, history)` → Groq'a system prompt + geçmiş + mesaj gönderilir
 4. Groq saf JSON döner: `{"module": "...", "action": "...", "params": {...}}`
@@ -185,7 +279,9 @@ Hiçbir kategoriye girmeyen mesajlar için PRISM sohbet moduna geçer.
 (`TELEGRAM_WEBHOOK_SECRET` boşsa atlanır), update'i `BackgroundTasks`'e atıp hemen 200 döner
 (Telegram retry → çift işlem riski yok). `_handle_message()` sırası:
 
-1. Güvenlik: sadece `TELEGRAM_CHAT_ID`'e eşit chat_id kabul edilir
+1. Güvenlik: chat_id `users` tablosunda kayıtlı olmalı (tek env değeri değil).
+   Tanınmayan sohbet "⛔ Yetkisiz" alır ve **chat_id log'a yazılır** — yeni kişi
+   eklerken numarasını buradan alıyorsun
 2. Hızlı komutlar kontrol edilir (Groq bypass): `/start /hava /ozet /liste /hatirlaticilar /notlar /butce`
 3. Ses mesajı varsa: `_transcribe_voice(file_id)` → Groq Whisper → metin
 4. Fotoğraf varsa: en büyük boyut indirilir → `describe_image()` → `[Görsel analizi]: ...` metni
@@ -372,8 +468,10 @@ pytest
 ```
 
 `tests/` — harcama doğrulaması ve iadeler, çift kayıt tespiti, hatırlatıcı öteleme/erteleme
-mantığı, yedeğin geri yüklenebilirliği. Her test geçici veritabanı kullanır (`conftest.py`),
-gerçek `prism.db`'ye dokunulmaz.
+mantığı, yedeğin geri yüklenebilirliği, **sahiplik kuralları** (`test_sahiplik.py`:
+başkasının kaydını değiştirme denemesi 403, okuma serbest) ve **konum/hava durumu**
+(`test_konum.py`). Her test geçici veritabanı kullanır (`conftest.py`), gerçek
+`prism.db`'ye dokunulmaz.
 
 **Öncelik bazlı bildirim sıklığı** (`get_notification_interval()`):
 - Kritik (1): son 1 saatte 15 dk'da bir, 1-3 saatte 30 dk'da bir...
@@ -384,7 +482,10 @@ gerçek `prism.db`'ye dokunulmaz.
 
 ```
 TELEGRAM_TOKEN           → Bot token
-TELEGRAM_CHAT_ID         → Yetkili kullanıcı chat ID (güvenlik için zorunlu)
+TELEGRAM_CHAT_ID         → 1. kullanıcının chat ID'si. İki işi var: ilk kurulumda
+                            users tablosuna yazılır, sonrasında sahipsiz kalan
+                            bildirimlerin düştüğü yedek adres. Yetki kontrolü artık
+                            buradan DEĞİL users tablosundan yapılıyor.
 TELEGRAM_WEBHOOK_SECRET  → Webhook imza doğrulaması (boşsa devre dışı)
 GROQ_API_KEY             → Groq API key (LLM + Whisper + Vision)
 GROQ_MODEL               → Metin/komut modeli (varsayılan: llama-3.3-70b-versatile)
@@ -392,8 +493,15 @@ GROQ_FALLBACK_MODEL      → Ana model hata verirse düşülecek model (varsayı
 LOG_LEVEL                → DEBUG|INFO|WARNING|ERROR (varsayılan: INFO)
 GROQ_WHISPER_MODEL       → Ses transkripsiyon modeli (varsayılan: whisper-large-v3)
 GROQ_VISION_MODEL        → Görsel analiz modeli (varsayılan: qwen/qwen3.6-27b)
-API_KEY                  → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal)
-PANEL_PASSWORD           → Web paneline giriş parolası (boşsa panele giriş yapılamaz)
+API_KEY                  → REST API anahtarı (X-API-Key header; boşsa auth devre dışı — sadece lokal).
+                            Bu anahtarla gelen istek her zaman 1. kullanıcı sayılır.
+PANEL_PASSWORD           → SADECE İLK KURULUMDA okunur: users tablosu boşken 1. kullanıcı
+                            bu parolayla yaratılır. Sonra parolalar veritabanında (scrypt);
+                            değiştirmek için `kullanici.py parola "<ad>"`. Env'i değiştirmek
+                            girişi etkilemez.
+PANEL_USER_NAME          → İlk kullanıcının adı (varsayılan: Eyüp). Sadece ilk kurulumda.
+SESSION_SECRET           → Panel oturum biletinin imza anahtarı. Yoksa API_KEY'e düşer
+                            (eski davranış). Değişirse açık oturumların hepsi düşer.
 EXPENSE_DUPLICATE_WINDOW_MINUTES → Aynı tutarlı ikinci bildirimin çift sayılacağı aralık (varsayılan 5)
 WEBHOOK_URL              → Genel HTTPS adresi (Telegram webhook için: https://kendi-alan-adin.example.com)
 CORS_ORIGINS             → İzin verilen origin'ler, virgülle ayrılır (boşsa hepsi serbest)
@@ -447,6 +555,25 @@ servis `/etc/systemd/system/prism.service`, vekil `/etc/caddy/Caddyfile`.
 **Güvenlik duvarı iki katmanlı:** OCI Security List **ve** sunucunun `iptables`'ı — port açarken
 ikisinde de açman gerekir (`iptables` değişikliği sonrası `sudo netfilter-persistent save`).
 
+### Kullanıcı eklemek / parola değiştirmek
+
+Parola ve chat_id `.env`'e yazılmıyor; ayrı bir komut satırı aracıyla veritabanına giriyor:
+
+```bash
+cd ~/prism && source venv/bin/activate
+python kullanici.py listele                       # kim var, chat_id'leri ne
+python kullanici.py ekle "Ad Soyad"               # parolayı ekranda sormaz (getpass)
+python kullanici.py chat-id "Ad Soyad" 123456789  # Telegram'ı bağla
+python kullanici.py parola "Ad Soyad"             # parola unutulursa yenisi
+```
+
+**chat_id nasıl öğrenilir:** kişi bota `/start` yazar → sunucu logunda
+`Yetkisiz chat: <numara>` satırı çıkar (`sudo journalctl -u prism -n 50 | grep Yetkisiz`).
+O numara `chat-id` komutuna verilir; kişi tekrar `/start` yazdığında artık tanınır.
+
+⚠️ Bu araç veritabanını doğrudan açar. Servis çalışırken de güvenli (SQLite WAL),
+ama parola değişikliği **açık oturumları düşürmez** — çerez süresi dolana kadar geçerli.
+
 ### Dışarıdan izleme (uptime)
 
 `https://kendi-alan-adin.example.com/health` ücretsiz bir izleme servisi (UptimeRobot vb.)
@@ -476,14 +603,20 @@ Caddy tek site bloğunda yolları ayırır:
 | Yol | Koruma | Nereye |
 |---|---|---|
 | `/webhook*` | Telegram imzası | backend |
-| `/api/auth/*` | yok (giriş uçları) | backend |
+| `/api/auth/me,login,logout` | yok (giriş uçları) | backend |
+| `/api/auth/konum` | rota kendi `Depends`'ini taşıyor | backend |
 | `/api/*` | `X-API-Key` **veya** `prism_session` çerezi | backend |
 | `/health` | yok | backend |
 | diğer her şey | yok — panel kabuğu sır içermez | `/var/www/prism-panel/dist` statik dosyalar |
 
 Panel gizli anahtar **taşımaz**: `frontend/.env`'de `VITE_API_URL` boş (istekler göreli yoldan
-aynı sunucuya gider), `VITE_API_KEY` diye bir değişken yok. Kullanıcı `PANEL_PASSWORD` ile giriş
-yapar, HttpOnly çerez alır. Derleme sonrası `dist/` içinde `X-API-Key` geçmemeli — kontrol et.
+aynı sunucuya gider), `VITE_API_KEY` diye bir değişken yok. Kullanıcı kendi parolasıyla giriş
+yapar (users tablosu), HttpOnly çerez alır. Derleme sonrası `dist/` içinde `X-API-Key`
+geçmemeli — kontrol et.
+
+**iPhone'da ana ekrana ekleme:** Safari → Paylaş → "Ana Ekrana Ekle". `display: standalone`
+olduğu için tarayıcı çubuğu olmadan açılır. Bildirim göndermez — hatırlatıcılar Telegram'dan
+gelir, panel yalnızca bakma/yazma yeri.
 
 Panel güncelleme: PC'de `npm run build` → `scp -r frontend\dist ...:/var/www/prism-panel/` →
 sunucuda **`chmod -R a+rX /var/www/prism-panel`** (scp Windows'tan kısıtlı izinle geldiği için şart).
