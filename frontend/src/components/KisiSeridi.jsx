@@ -2,7 +2,7 @@ import { Eye, User } from 'lucide-react'
 import { useKullanici } from '../kullanici'
 
 /**
- * Üstteki kişi geçişi + salt görüntüleme uyarısı.
+ * Üstteki kişi geçişi + salt görüntüleme işareti.
  *
  * Tek kullanıcı varsa hiç çizilmiyor — iki kişi olmadan bu şeridin anlamı yok
  * ve paneli boş yere daraltır.
@@ -44,13 +44,18 @@ export default function KisiSeridi() {
         </div>
 
         {saltOkunur ? (
-          <p className="text-xs flex items-center gap-1.5" style={{ color: 'var(--accent-bright)' }}>
-            <Eye size={13} />
-            <span>
-              <strong className="font-semibold">{bakilan.ad}</strong>'ün verilerine bakıyorsun —
-              salt görüntüleme, değiştiremezsin
-            </span>
-          </p>
+          // Yazı yok, tek göz işareti: şeridin moru + seçili sekmedeki göz zaten
+          // "başkasının verisi" diyor, cümle onu tekrar ediyordu. Anlam yine de
+          // kaybolmasın diye title (üstüne gelince) ve aria-label duruyor.
+          <span
+            role="img"
+            title={`${bakilan.ad} — salt görüntüleme, değiştiremezsin`}
+            aria-label={`${bakilan.ad} verilerinde salt görüntüleme`}
+            className="flex items-center"
+            style={{ color: 'var(--accent-bright)' }}
+          >
+            <Eye size={16} />
+          </span>
         ) : (
           <p className="text-xs" style={{ color: 'var(--text-faint)' }}>
             Kendi verilerin
