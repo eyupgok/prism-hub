@@ -2,9 +2,23 @@
 <html lang="tr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover ŞART: BottomNav'daki env(safe-area-inset-bottom) ancak
+         bununla çalışır. Onsuz iPhone'da alt gezinme ana ekran çubuğunun altında
+         kalıyordu. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#0a0a0f" />
+
+    <!-- Ana ekrana eklenince uygulama gibi açılsın. Zeynep iPhone'da, Android
+         uygulaması kurulamıyor — onun "uygulaması" bu olacak.
+         status-bar-style=black seçildi, black-translucent DEĞİL: translucent'ta
+         içerik çentiğin altına giriyor ve üstteki kişi şeridi oraya sıkışıyor. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="PRISM" />
     <title>PRISM Hub</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
