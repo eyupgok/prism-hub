@@ -32,8 +32,18 @@ async def lifespan(app: FastAPI):
 
     if not os.getenv("API_KEY", ""):
         log.warning("API_KEY ayarlanmamış — REST API doğrulaması DEVRE DIŞI (sadece lokal geliştirme için uygundur)")
-    elif not os.getenv("PANEL_PASSWORD", ""):
-        log.warning("PANEL_PASSWORD ayarlanmamış — web paneline giriş yapılamaz (API_KEY ile REST erişimi çalışır)")
+    else:
+        # Parolalar artık env'de değil users tablosunda; uyarı da oraya bakmalı.
+        # PANEL_PASSWORD dolu olsa bile tablo boşsa (ör. göç yapılmamış eski DB)
+        # panele girilemez, tersi de doğru: env boş ama kayıtlı kullanıcı varsa sorun yok.
+        from auth import panel_login_enabled
+
+        if not panel_login_enabled():
+            log.warning(
+                "Kayıtlı kullanıcı yok — web paneline giriş yapılamaz. "
+                "`python kullanici.py ekle \"<ad>\"` ile ekle "
+                "(API_KEY ile REST erişimi çalışmaya devam eder)."
+            )
 
     webhook_url = os.getenv("WEBHOOK_URL", "").rstrip("/")
     if webhook_url:
@@ -80,7 +90,7 @@ app.include_router(weather_router, dependencies=protected)
 app.include_router(summary_router, dependencies=protected)
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health(response: Response):
     """Dışarıdan izleme için sağlık kontrolü.
 
@@ -88,6 +98,12 @@ async def health(response: Response):
     durmuşsa ya da hatırlatıcı döngüsü takılmışsa servis çalışıyor görünür ama
     işe yaramaz. İzleme servisi bunu fark edebilsin diye üçü de kontrol ediliyor
     ve bozuksa 503 dönüyor.
+
+    HEAD de kabul ediliyor: bazı izleme servisleri gövdeyi indirmemek için GET
+    yerine HEAD atıyor ve FastAPI, Starlette'in aksine GET rotasına HEAD'i
+    kendiliğinden eklemiyor — 405 dönüyordu. "200 değilse alarm ver" kuralıyla
+    kurulmuş bir izleme bunu kesintiymiş gibi okur. Kontroller HEAD'de de aynen
+    çalışır, sunucu yalnız gövdeyi göndermez; önemli olan durum kodu zaten.
     """
     checks = {"database": "ok", "scheduler": "ok", "reminder_loop": "ok"}
 

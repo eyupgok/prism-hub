@@ -596,6 +596,12 @@ haber çıkmazsa takılmış sayılır.
 ⚠️ İzleme servisini kurarken **"200 dışındaki kodda alarm ver"** ayarını seç. Sadece
 "site açılıyor mu" bakan bir kontrol 503'ü de başarı sayabilir — o zaman bu iş boşa gider.
 
+Uç hem **GET hem HEAD** kabul eder (`@app.api_route(..., methods=["GET", "HEAD"])`).
+Bazı izleme servisleri gövdeyi indirmemek için HEAD atıyor; FastAPI ise Starlette'in
+aksine GET rotasına HEAD'i kendiliğinden eklemiyor ve 405 dönüyordu — yukarıdaki
+alarm kuralıyla birleşince sürekli yanlış alarm demek. `tests/test_health.py`
+HEAD'in hem 200 hem 503 halini ayrıca sınıyor.
+
 ### Web paneli (aynı domain, kökte)
 
 Caddy tek site bloğunda yolları ayırır:

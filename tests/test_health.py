@@ -73,3 +73,26 @@ def test_dongu_hic_calismadiysa_503(client, monkeypatch):
 
     assert r.status_code == 503
     assert r.json()["checks"]["reminder_loop"] == "hiç çalışmadı"
+
+
+def test_head_ile_de_cevap_verir(client, monkeypatch):
+    """Bazı izleme servisleri gövdeyi indirmemek için HEAD atıyor.
+
+    FastAPI, Starlette'in aksine GET rotasına HEAD'i kendiliğinden eklemiyor;
+    eklenmediğinde 405 dönüyordu ve "200 değilse alarm ver" kuralıyla kurulmuş
+    bir izleme bunu kesinti sanıyordu.
+    """
+    _fake_scheduler(monkeypatch, running=True, last_check_age_seconds=30)
+
+    r = client.head("/health")
+
+    assert r.status_code == 200
+
+
+def test_head_bozuk_durumda_da_503(client, monkeypatch):
+    """Asıl mesele: HEAD yolu arızayı da doğru bildirmeli, hep 200 dememeli."""
+    _fake_scheduler(monkeypatch, running=False, last_check_age_seconds=30)
+
+    r = client.head("/health")
+
+    assert r.status_code == 503
