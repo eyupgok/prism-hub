@@ -4,6 +4,7 @@ import LiraSign from '../components/LiraSign'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { api } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { useKullanici } from '../kullanici'
 
 function useNow() {
   const [now, setNow] = useState(new Date())
@@ -101,6 +102,7 @@ function StatCard({ icon, iconBg, label, value, sub, onClick, delay = '' }) {
 }
 
 export default function Dashboard({ onNavigate }) {
+  const { kullanici, bakilan, saltOkunur } = useKullanici()
   const [reminders, setReminders] = useState([])
   const [notes, setNotes] = useState([])
   const [summary, setSummary] = useState(null)
@@ -158,7 +160,11 @@ export default function Dashboard({ onNavigate }) {
           </div>
 
           <h1 className="text-3xl sm:text-4xl font-display font-bold tracking-tight text-white">
-            {greeting()}, <span className="accent-text">Eyüp</span>
+            {saltOkunur ? (
+              <><span className="accent-text">{bakilan.ad}</span>'ün paneli</>
+            ) : (
+              <>{greeting()}, <span className="accent-text">{kullanici?.ad}</span></>
+            )}
           </h1>
 
           <p className="mt-2 text-sm min-h-[20px]" style={{ color: 'var(--text-soft)' }}>

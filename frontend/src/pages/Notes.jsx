@@ -3,6 +3,7 @@ import { Plus, Search, Trash2, FileText } from 'lucide-react'
 import { api } from '../api/client'
 import Modal from '../components/Modal'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { useKullanici } from '../kullanici'
 
 const CATEGORIES = ['iş', 'kişisel', 'genel', 'ders', 'fikir']
 const CAT_STYLE = {
@@ -14,6 +15,7 @@ const CAT_STYLE = {
 }
 
 export default function Notes() {
+  const { saltOkunur } = useKullanici()
   const [notes, setNotes] = useState([])
   const [category, setCategory] = useState(null)
   const [search, setSearch] = useState('')
@@ -77,10 +79,12 @@ export default function Notes() {
           </h1>
           <p className="text-slate-500 text-sm mt-1">{notes.length} not</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="btn-primary">
-          <Plus size={16} />
-          Yeni Not
-        </button>
+        {!saltOkunur && (
+          <button onClick={() => setShowModal(true)} className="btn-primary">
+            <Plus size={16} />
+            Yeni Not
+          </button>
+        )}
       </div>
 
       {error && (
@@ -137,12 +141,14 @@ export default function Notes() {
             <div key={n.id} className="glass-card p-4 mb-4 break-inside-avoid group">
               <div className="flex items-start justify-between gap-2 mb-2">
                 <h3 className="text-slate-100 font-medium text-sm leading-snug flex-1">{n.title}</h3>
-                <button
-                  onClick={() => handleDelete(n.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-700 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all flex-shrink-0"
-                >
-                  <Trash2 size={14} />
-                </button>
+                {!saltOkunur && (
+                  <button
+                    onClick={() => handleDelete(n.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-700 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all flex-shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
               <p className="text-slate-500 text-xs leading-relaxed whitespace-pre-wrap line-clamp-6">
                 {n.content}

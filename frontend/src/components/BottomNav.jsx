@@ -1,4 +1,4 @@
-import { Home, Bell, FileText, Settings } from 'lucide-react'
+import { Home, Bell, FileText, MessageSquare, Settings } from 'lucide-react'
 import LiraSign from './LiraSign'
 
 const NAV = [
@@ -6,6 +6,7 @@ const NAV = [
   { id: 'reminders', label: 'Görev', icon: Bell },
   { id: 'notes', label: 'Not', icon: FileText },
   { id: 'expenses', label: 'Harcama', icon: LiraSign },
+  { id: 'sohbet', label: 'Sohbet', icon: MessageSquare },
   { id: 'settings', label: 'Ayarlar', icon: Settings },
 ]
 

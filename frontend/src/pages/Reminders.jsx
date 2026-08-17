@@ -3,6 +3,7 @@ import { Plus, Check, Clock, Trash2, Bell, RefreshCw } from 'lucide-react'
 import { api } from '../api/client'
 import Modal from '../components/Modal'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { useKullanici } from '../kullanici'
 
 const PRIORITY_BADGE = {
   1: 'text-red-400 bg-red-400/10 border-red-400/30',
@@ -38,6 +39,7 @@ function defaultDT() {
 }
 
 export default function Reminders() {
+  const { saltOkunur } = useKullanici()
   const [items, setItems] = useState([])
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
@@ -106,13 +108,15 @@ export default function Reminders() {
           </h1>
           <p className="text-slate-500 text-sm mt-1">{activeCount} aktif</p>
         </div>
-        <button
-          onClick={() => { setShowModal(true); setForm({ title: '', due_datetime: defaultDT(), priority: 3, recurrence: 'none' }) }}
-          className="btn-primary"
-        >
-          <Plus size={16} />
-          Yeni
-        </button>
+        {!saltOkunur && (
+          <button
+            onClick={() => { setShowModal(true); setForm({ title: '', due_datetime: defaultDT(), priority: 3, recurrence: 'none' }) }}
+            className="btn-primary"
+          >
+            <Plus size={16} />
+            Yeni
+          </button>
+        )}
       </div>
 
       {error && (
@@ -181,7 +185,7 @@ export default function Reminders() {
                   </span>
                 )}
 
-                {!r.is_completed && (
+                {!r.is_completed && !saltOkunur && (
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                       onClick={() => handleSnooze(r.id, 15)}
@@ -207,7 +211,7 @@ export default function Reminders() {
                   </div>
                 )}
 
-                {r.is_completed && (
+                {r.is_completed && !saltOkunur && (
                   <button
                     onClick={() => handleDelete(r.id)}
                     className="p-1.5 text-slate-700 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors flex-shrink-0"

@@ -1,5 +1,6 @@
-import { Home, Bell, FileText, Settings, Sparkles } from 'lucide-react'
+import { Home, Bell, FileText, MessageSquare, Settings, Sparkles } from 'lucide-react'
 import LiraSign from './LiraSign'
+import { useKullanici } from '../kullanici'
 
 // Tailwind sınıf adlarını kaynak dosyada birebir arar — `stagger-${i}` gibi
 // birleştirilmiş adları göremez ve o kuralları çıktıdan siler. O yüzden düz liste.
@@ -10,10 +11,13 @@ const NAV = [
   { id: 'reminders', label: 'Hatırlatıcılar', icon: Bell },
   { id: 'notes', label: 'Notlar', icon: FileText },
   { id: 'expenses', label: 'Harcamalar', icon: LiraSign },
+  { id: 'sohbet', label: 'Sohbet', icon: MessageSquare },
   { id: 'settings', label: 'Ayarlar', icon: Settings },
 ]
 
 export default function Sidebar({ active, onNavigate }) {
+  const { kullanici } = useKullanici()
+
   return (
     <aside
       className="hidden md:flex flex-col w-64 h-screen fixed left-0 top-0 z-20 border-r"
@@ -65,7 +69,7 @@ export default function Sidebar({ active, onNavigate }) {
 
       {/* Footer */}
       <div className="px-6 py-4 border-t" style={{ borderColor: 'var(--border)' }}>
-        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>Eyüp Gök</p>
+        <p className="text-xs" style={{ color: 'var(--text-soft)' }}>{kullanici?.ad || '—'}</p>
         <p className="text-xs mt-0.5" style={{ color: 'var(--text-faint)' }}>PRISM v1.0</p>
       </div>
     </aside>

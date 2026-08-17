@@ -6,6 +6,7 @@ import { api } from '../api/client'
 import Modal from '../components/Modal'
 import LoadingSpinner from '../components/LoadingSpinner'
 import BudgetPanel from '../components/BudgetPanel'
+import { useKullanici } from '../kullanici'
 
 const CATEGORIES = ['yemek', 'ulaşım', 'eğlence', 'fatura', 'alışveriş', 'diğer']
 const CAT_ICON = { yemek: '🍔', ulaşım: '🚗', eğlence: '🎮', fatura: '💡', alışveriş: '🛒', diğer: '📦' }
@@ -25,6 +26,7 @@ function nowMonth() {
 }
 
 export default function Expenses() {
+  const { saltOkunur } = useKullanici()
   const [tab, setTab] = useState('list')   // 'list' | 'budget'
   const [expenses, setExpenses] = useState([])
   const [summary, setSummary] = useState(null)
@@ -103,10 +105,12 @@ export default function Expenses() {
               onChange={e => setMonth(e.target.value)}
               className="input-field w-auto"
             />
-            <button onClick={() => setShowModal(true)} className="btn-primary">
-              <Plus size={16} />
-              Ekle
-            </button>
+            {!saltOkunur && (
+              <button onClick={() => setShowModal(true)} className="btn-primary">
+                <Plus size={16} />
+                Ekle
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -262,12 +266,14 @@ export default function Expenses() {
                         ? `+ ${Math.abs(e.amount).toLocaleString('tr-TR', { minimumFractionDigits: 0 })} ₺`
                         : `- ${e.amount.toLocaleString('tr-TR', { minimumFractionDigits: 0 })} ₺`}
                     </span>
-                    <button
-                      onClick={() => handleDelete(e.id)}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-700 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {!saltOkunur && (
+                      <button
+                        onClick={() => handleDelete(e.id)}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-700 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

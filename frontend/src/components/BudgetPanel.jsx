@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus, Trash2, AlertTriangle } from 'lucide-react'
 import { api } from '../api/client'
 import LoadingSpinner from './LoadingSpinner'
+import { useKullanici } from '../kullanici'
 
 // Harcamalar sayfasının "Bütçe" sekmesi. Ayrı sayfa değil — limit belirlemek
 // harcamaya bakarken akla gelen bir iş, menüde ayrı durunca kopuk kalıyordu.
@@ -29,6 +30,7 @@ function barColor(pct) {
 }
 
 export default function BudgetPanel() {
+  const { saltOkunur } = useKullanici()
   const [budgets, setBudgets] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -86,6 +88,7 @@ export default function BudgetPanel() {
       )}
 
       {/* Yeni limit */}
+      {!saltOkunur && (
       <form onSubmit={save} className="glass-card p-5 space-y-4">
         <div>
           <h2 className="text-white font-display font-semibold text-base">Limit belirle</h2>
@@ -121,6 +124,7 @@ export default function BudgetPanel() {
           </button>
         </div>
       </form>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
@@ -153,6 +157,7 @@ export default function BudgetPanel() {
                     </span>
                     <button
                       onClick={() => remove(b.category)}
+                      hidden={saltOkunur}
                       className="p-1.5 rounded-lg transition-colors hover:text-red-400"
                       style={{ color: 'var(--text-faint)' }}
                       aria-label={`${b.category} limitini kaldır`}

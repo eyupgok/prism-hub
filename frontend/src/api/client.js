@@ -12,7 +12,29 @@ export class AuthError extends Error {
   }
 }
 
+/**
+ * Üstteki geçiş menüsüyle seçilen kişi (null = kendisi).
+ *
+ * Sadece GET isteklerine `?kisi=` olarak ekleniyor. Yazma isteklerine BİLEREK
+ * eklenmiyor: yazma her zaman giriş yapan kişinin kendi verisine gider, sunucu
+ * da başkasınınkine dokunmayı 403 ile reddediyor. Parametreyi yazmaya da
+ * taşısaydık "başkası adına kaydet" diye bir şey uydurmuş olurduk.
+ */
+let bakilanKisi = null
+
+export function setBakilanKisi(id) {
+  bakilanKisi = id ?? null
+}
+
+function kisiEkle(path) {
+  if (bakilanKisi == null || path.startsWith('/api/auth/')) return path
+  return `${path}${path.includes('?') ? '&' : '?'}kisi=${bakilanKisi}`
+}
+
 async function request(path, options = {}) {
+  const yontem = (options.method || 'GET').toUpperCase()
+  if (yontem === 'GET') path = kisiEkle(path)
+
   const res = await fetch(`${BASE_URL}${path}`, {
     credentials: 'same-origin', // oturum çerezi gitsin
     headers: {
@@ -44,6 +66,8 @@ export const api = {
   login: (password) =>
     request('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
+  konumBildir: (enlem, boylam) =>
+    request('/api/auth/konum', { method: 'POST', body: JSON.stringify({ enlem, boylam }) }),
 
   getReminders: (includeCompleted = false) =>
     request(`/api/reminders/?include_completed=${includeCompleted}`),
@@ -88,6 +112,24 @@ export const api = {
     request('/api/budget/', { method: 'PUT', body: JSON.stringify(data) }),
   deleteBudget: (category) =>
     request(`/api/budget/${encodeURIComponent(category)}`, { method: 'DELETE' }),
+
+  // Sohbet: yanıt gövdesi FormData olduğu için Content-Type'ı tarayıcı koysun
+  // (sınır dizesini o üretiyor) — bu yüzden request() değil doğrudan fetch.
+  sohbet: (message) =>
+    request('/api/chat/', { method: 'POST', body: JSON.stringify({ message }) }),
+  sohbetGorsel: async (dosya, message = '') => {
+    const fd = new FormData()
+    fd.append('file', dosya)
+    fd.append('message', message)
+    const res = await fetch(`${BASE_URL}/api/chat/image`, {
+      method: 'POST', credentials: 'same-origin', body: fd,
+    })
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}))
+      throw new Error(e.detail || `HTTP ${res.status}`)
+    }
+    return res.json()
+  },
 
   getWeather: () => request('/api/weather/'),
   getSummary: () => request('/api/summary/'),
