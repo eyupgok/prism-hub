@@ -269,6 +269,12 @@ summary.get
 chat.respond
 ```
 
+**Panel adresi:** `ai_router.panel_adresi()` → `PANEL_URL`, yoksa `WEBHOOK_URL` (panel
+webhook ile aynı alan adının kökünde). Adres system prompt'a gömülüyor, böylece
+"site linkini ver" gibi cümleler `chat.respond` ile doğru adresi döndürüyor.
+Hiç tanımlı değilse `(ayarlanmamış)` gider — boş bırakılsa model adres uydurabilirdi.
+Aynı bilgi `/site` hızlı komutuyla Groq'a hiç uğramadan da alınabiliyor.
+
 **Görsel mesajlar:** Fotoğraf geldiğinde önce `describe_image()` (vision modeli) Türkçe analiz üretir;
 analiz `[Görsel analizi]: ...` bloğu olarak kullanıcı mesajına eklenip normal pipeline'a girer.
 Fiş/fatura ise router harcama kaydeder, soru sorulmuşsa chat modunda yanıtlar.
@@ -285,7 +291,7 @@ Hiçbir kategoriye girmeyen mesajlar için PRISM sohbet moduna geçer.
 1. Güvenlik: chat_id `users` tablosunda kayıtlı olmalı (tek env değeri değil).
    Tanınmayan sohbet "⛔ Yetkisiz" alır ve **chat_id log'a yazılır** — yeni kişi
    eklerken numarasını buradan alıyorsun
-2. Hızlı komutlar kontrol edilir (Groq bypass): `/start /hava /ozet /liste /hatirlaticilar /notlar /butce`
+2. Hızlı komutlar kontrol edilir (Groq bypass): `/start /site /hava /ozet /liste /hatirlaticilar /notlar /butce`
 3. Ses mesajı varsa: `_transcribe_voice(file_id)` → Groq Whisper → metin
 4. Fotoğraf varsa: en büyük boyut indirilir → `describe_image()` → `[Görsel analizi]: ...` metni
 5. "⏳ İşleniyor..." mesajı gönderilir, mesaj ID'si alınır
@@ -507,6 +513,8 @@ SESSION_SECRET           → Panel oturum biletinin imza anahtarı. Yoksa API_KE
                             (eski davranış). Değişirse açık oturumların hepsi düşer.
 EXPENSE_DUPLICATE_WINDOW_MINUTES → Aynı tutarlı ikinci bildirimin çift sayılacağı aralık (varsayılan 5)
 WEBHOOK_URL              → Genel HTTPS adresi (Telegram webhook için: https://kendi-alan-adin.example.com)
+PANEL_URL                → Panelin adresi. Yazılmazsa WEBHOOK_URL kullanılır (ikisi aynı
+                            alan adı). Yalnız panel başka bir yere taşınırsa gerekir.
 CORS_ORIGINS             → İzin verilen origin'ler, virgülle ayrılır (boşsa hepsi serbest)
 WEATHER_CITY             → Elazığ  (varsayılan)
 WEATHER_LAT              → 38.6748 (varsayılan)

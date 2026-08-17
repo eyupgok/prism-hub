@@ -94,3 +94,41 @@ async def test_haftalik_rapor_cubuk_ve_kategori(db):
     assert "Haftalık rapor" in text
     assert "▓" in text            # günlük dağılım çubuğu
     assert "alışveriş" in text
+
+
+# ── Panel adresi ─────────────────────────────────────────────────────────────
+# "site linkini ver" dendiğinde adres yönergeden okunuyor. Yanlış adres vermek,
+# hiç vermemekten kötü: kullanıcı açılmayan bir bağlantıyla uğraşır.
+
+def test_panel_adresi_webhook_urlden_turer(monkeypatch):
+    """Panel, webhook ile aynı alan adının kökünde — ayrı değişken şart değil."""
+    monkeypatch.delenv("PANEL_URL", raising=False)
+    monkeypatch.setenv("WEBHOOK_URL", "https://kendi-alan-adin.example.com/")
+
+    assert ai_router.panel_adresi() == "https://kendi-alan-adin.example.com"
+
+
+def test_panel_url_webhookun_onunde(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_URL", "https://kendi-alan-adin.example.com")
+    monkeypatch.setenv("PANEL_URL", "https://panel.ornek.com")
+
+    assert ai_router.panel_adresi() == "https://panel.ornek.com"
+
+
+def test_adres_yoksa_bos_donmez(monkeypatch):
+    """Boş satır gören model adres uydurabilir; açıkça 'yok' demesi gerekiyor."""
+    monkeypatch.delenv("PANEL_URL", raising=False)
+    monkeypatch.delenv("WEBHOOK_URL", raising=False)
+
+    assert ai_router.panel_adresi() == "(ayarlanmamış)"
+
+
+def test_adres_yonergeye_giriyor(monkeypatch):
+    monkeypatch.setenv("PANEL_URL", "https://panel.ornek.com")
+
+    yonerge = ai_router.SYSTEM_PROMPT.format(
+        now="2026-08-17 23:00", today="2026-08-17",
+        ad="Eyüp", panel_url=ai_router.panel_adresi(),
+    )
+
+    assert "Web panelinin adresi: https://panel.ornek.com" in yonerge

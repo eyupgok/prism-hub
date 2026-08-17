@@ -226,9 +226,29 @@ async def _handle_message(message: Dict[str, Any]):
             "• <i>İş notlarıma bak</i>\n"
             "• <i>Hava nasıl?</i>\n"
             "• <i>Sabah özetini ver</i>\n\n"
-            "Hızlı komutlar: /hava /ozet /aksam /hafta /liste /notlar /butce /yedek",
+            "Hızlı komutlar: /site /hava /ozet /aksam /hafta /liste /notlar /butce /yedek",
             chat_id=chat_id,
         )
+        return
+
+    if text == "/site":
+        # Doğal dille de sorulabiliyor ("site linkini ver") ama o yol Groq'tan
+        # geçiyor. Adres, Groq çöktüğünde de lazım olan türden bir bilgi —
+        # bu yüzden ayrıca sabit bir komut var.
+        from ai_router import panel_adresi
+
+        adres = panel_adresi()
+        if adres == "(ayarlanmamış)":
+            await send_message(
+                "⚙️ Panel adresi sunucuda tanımlı değil (<code>PANEL_URL</code>).",
+                chat_id=chat_id,
+            )
+        else:
+            await send_message(
+                f"🌐 <b>PRISM paneli</b>\n{adres}\n\n"
+                "<i>iPhone'da Safari ile aç → Paylaş → Ana Ekrana Ekle</i>",
+                chat_id=chat_id,
+            )
         return
 
     if text == "/hava":

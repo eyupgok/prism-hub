@@ -123,6 +123,12 @@ Kullanıcı fotoğraf gönderirse mesajda "[Görsel analizi]: ..." bloğu bulunu
 - Kullanıcı görselle ilgili soru soruyorsa chat.respond ile görsel analizine dayanarak yanıtla.
 - Kullanıcı "not al" diyorsa görseldeki metni notes.create ile kaydet.
 
+## PANEL ADRESİ
+Web panelinin adresi: {panel_url}
+"site linki", "panel adresi", "siteyi ver", "linki at", "web adresi" gibi isteklerde
+chat.respond ile bu adresi ver. Adresi olduğu gibi yaz — kısaltma, değiştirme, uydurma.
+Adres yerinde "(ayarlanmamış)" yazıyorsa panelin adresinin tanımlı olmadığını söyle.
+
 ## SOHBET
 Eğer mesaj hiçbir kategoriye girmiyorsa, PRISM olarak samimi ve kısa Türkçe yanıt ver:
 {{"module": "chat", "action": "respond", "params": {{"message": "..."}}}}
@@ -152,6 +158,21 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 HISTORY_LIMIT = 10
 
 
+def panel_adresi() -> str:
+    """Web panelinin adresi.
+
+    Panel, Telegram webhook'uyla **aynı** alan adının kökünde yayında (Caddy tek
+    site bloğunda yolları ayırıyor), o yüzden ayrı bir değişken şart değil:
+    `WEBHOOK_URL` zaten doğru adresi tutuyor. Yine de `PANEL_URL` öncelikli —
+    panel bir gün başka bir adrese taşınırsa kod değil `.env` değişsin.
+
+    Boş dönmüyor: yönergeye boş bir satır gitse model adresi uydurabilir,
+    "(ayarlanmamış)" gördüğünde ise durumu söylemesi isteniyor.
+    """
+    adres = (os.getenv("PANEL_URL", "") or os.getenv("WEBHOOK_URL", "")).strip().rstrip("/")
+    return adres or "(ayarlanmamış)"
+
+
 async def parse_message(
     user_message: str, history: List[Dict] = None, ad: str = "kullanıcı"
 ) -> Dict[str, Any]:
@@ -165,7 +186,9 @@ async def parse_message(
     """
     now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-    system = SYSTEM_PROMPT.format(now=now_str, today=today_str, ad=ad)
+    system = SYSTEM_PROMPT.format(
+        now=now_str, today=today_str, ad=ad, panel_url=panel_adresi()
+    )
 
     messages = [{"role": "system", "content": system}]
     if history:
