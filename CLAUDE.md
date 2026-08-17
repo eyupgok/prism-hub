@@ -48,6 +48,9 @@ yetki.py             → Yetki kuralları: `bakilan_sahip()` (GET'te kimin veris
                        `yazma_izni()` (yazmadan önce sahiplik; yoksa 404, başkasınınsa 403)
 kullanici.py         → Komut satırı aracı: kullanıcı ekle / parola değiştir / chat-id ata.
                        Parola ve chat_id koda ya da .env'e yazılmasın diye ayrı komut.
+gecmis.py            → Konuşma geçmişini okur (--kisi / --son / --ara / --ham).
+                       Asistan satırındaki ham JSON'u "modül.aksiyon (parametreler)"
+                       diye özetler; chat yanıtlarında metnin kendisini basar.
 database.py          → SQLite bağlantı, get_db() context manager, konuşma geçmişi + temizlik
 ai_router.py         → Groq NLP parsing, JSON dispatch, route_message(), _esc() HTML escape
 telegram_bot.py      → /webhook (secret token doğrulama + BackgroundTasks), hızlı komutlar,
@@ -573,6 +576,19 @@ O numara `chat-id` komutuna verilir; kişi tekrar `/start` yazdığında artık 
 
 ⚠️ Bu araç veritabanını doğrudan açar. Servis çalışırken de güvenli (SQLite WAL),
 ama parola değişikliği **açık oturumları düşürmez** — çerez süresi dolana kadar geçerli.
+
+### Konuşma geçmişine bakmak
+
+```bash
+cd ~/prism && source venv/bin/activate
+python gecmis.py                        # son 40 satır, herkes
+python gecmis.py --kisi "Zeynep"      # Telegram + panel kanallarını birlikte getirir
+python gecmis.py --son 100 --ara dişçi
+python gecmis.py --ham                  # Groq'un ürettiği JSON'u olduğu gibi
+```
+
+`conversations` **30 günlük** (03:00 temizliği) — eski bir şeyin çıkmaması arıza değil.
+Asıl arşiv Telegram'ın kendi sohbeti; buradaki kayıt "bot neyi nasıl anladı"nın izi.
 
 ### Dışarıdan izleme (uptime)
 
