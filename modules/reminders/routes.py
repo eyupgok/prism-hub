@@ -16,7 +16,7 @@ VALID_RECURRENCES = {"none", "daily", "weekly", "monthly"}
 class ReminderCreate(BaseModel):
     title: str
     due_datetime: str
-    priority: int = 3
+    priority: int = service.DEFAULT_PRIORITY
     recurrence: str = "none"
 
 

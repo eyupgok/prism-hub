@@ -31,7 +31,7 @@ Kullanıcı Türkçe konuşur. Mesajları analiz et ve SADECE JSON formatında y
 
 ## MODÜLLER VE AKSIYONLAR
 
-reminders.create → title(str), due_datetime(ISO 8601: {today}T14:30:00), priority(1=Kritik 2=Önemli 3=Normal), recurrence(none|daily|weekly|monthly)
+reminders.create → title(str), due_datetime(ISO 8601: {today}T14:30:00), priority(1=Kritik 2=Önemli 3=Normal 4=Sessiz — varsayılan 4), recurrence(none|daily|weekly|monthly)
 reminders.list → params boş
 reminders.update → id(int), title(str opsiyonel), due_datetime(ISO 8601 opsiyonel), priority(int opsiyonel), recurrence(none|daily|weekly|monthly opsiyonel)
 reminders.complete → id(int)
@@ -91,11 +91,13 @@ Tekrarlama belirleme:
 - "her ay", "aylık" → recurrence: monthly
 - belirtilmemişse → recurrence: none
 
-Öncelik belirleme:
-- "kritik", "çok önemli", "acil", "kesinlikle" → priority: 1
-- "önemli", "unutma" → priority: 2
-- belirtilmemişse → priority: 2
-- "önemsiz", "küçük" → priority: 3
+Öncelik belirleme (kaç kere bildirim gideceğini belirler):
+- "kritik", "çok önemli", "acil", "kesinlikle" → priority: 1  (7 bildirim)
+- "önemli", "unutma", "sakın kaçırmayayım" → priority: 2      (4 bildirim)
+- "önceden haber ver", "erkenden hatırlat" → priority: 3      (2 bildirim)
+- belirtilmemişse → priority: 4                               (1 bildirim, tam vaktinde)
+Kullanıcı ısrar ölçüsünü söylemediyse HER ZAMAN 4 kullan. Öncelik yükseltmek
+bildirim sayısını artırır; istenmediği halde yükseltmek rahatsız edicidir.
 
 ## NOT ALMA KURALLARI
 Şu ifadeler not anlamına gelir:
@@ -282,7 +284,9 @@ async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
                 owner_id,
                 params["title"],
                 params["due_datetime"],
-                params.get("priority", 2),
+                # Model öncelik yazmadıysa en sessiz seviye. Yönergede de yazıyor
+                # ama son söz burada: varsayılanı modelin insafına bırakmıyoruz.
+                params.get("priority", svc.DEFAULT_PRIORITY),
                 params.get("recurrence", "none"),
             )
             due = svc.parse_dt(r["due_datetime"])

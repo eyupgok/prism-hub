@@ -52,9 +52,16 @@ def test_tekrarlamayan_gecikmise_dokunulmaz(db):
 
 def test_oncelik_araliga_sikistirilir(db):
     r = svc.create_reminder(db, SAHIP, "Test", _in(60), 99, "none")
-    assert r["priority"] == 3
+    assert r["priority"] == 4
     assert svc.normalize_priority(0) == 1
-    assert svc.normalize_priority("abc") == 3
+    assert svc.normalize_priority("abc") == svc.DEFAULT_PRIORITY
+
+
+def test_oncelik_belirtilmezse_sessiz(db):
+    """Varsayılan gürültülü olursa her kayıt bildirim yağmuruna dönüyordu."""
+    r = svc.create_reminder(db, SAHIP, "Test", _in(60))
+    assert r["priority"] == 4
+    assert svc.NOTIFICATION_POINTS[4] == [0]   # yalnız vadesinde
 
 
 def test_gecersiz_tekrar_none_olur(db):
@@ -74,6 +81,106 @@ def test_asiri_erteleme_bir_haftayla_sinirli(db):
     snoozed = svc.snooze_reminder(db, SAHIP, r["id"], 999_999)
     days = (svc.parse_dt(snoozed["due_datetime"]) - svc.now_local()).total_seconds() / 86400
     assert days <= 7.01
+
+
+# ── Bildirim planı ───────────────────────────────────────────────────────────
+# Asıl mesele sayı. Eski "kalan süreye göre her N dakikada bir tekrarla" modelinde
+# tekrarın sonu yoktu; bir hafta önceden kurulan tek bir kritik hatırlatıcı 34
+# bildirim üretiyordu. Sabit noktalarda üst sınır listenin uzunluğu kadar —
+# aşağıdaki testler o sınırı kilitliyor.
+
+def _bildirim_anlari(priority: int, lead_minutes: int):
+    """Vadesine `lead_minutes` kala kurulan hatırlatıcıyı dakika dakika yürütür.
+
+    Dönen liste: bildirimlerin gittiği anlar, "vadeye kalan dakika" cinsinden
+    (eksi değer vadeden sonrasını gösterir).
+    """
+    t0 = svc.now_local()
+    due = t0 + timedelta(minutes=lead_minutes)
+    r = {
+        "due_datetime": due.isoformat(),
+        "priority": priority,
+        "last_notified_at": None,
+        "created_at": t0.isoformat(),
+    }
+
+    anlar = []
+    for adim in range(lead_minutes + svc.GIVE_UP_AFTER_MINUTES + 5):
+        now = t0 + timedelta(minutes=adim)
+        if svc.bildirim_gerekli(r, now):
+            anlar.append(round((due - now).total_seconds() / 60))
+            r["last_notified_at"] = now.isoformat()
+    return anlar
+
+
+def test_sessiz_yalniz_vadesinde_bir_kez_bildirir():
+    assert _bildirim_anlari(4, 10080) == [0]
+
+
+def test_hicbir_oncelik_planindan_fazla_bildirmez():
+    for p in (1, 2, 3, 4):
+        anlar = _bildirim_anlari(p, 10080)              # bir hafta önceden kuruldu
+        assert anlar == svc.NOTIFICATION_POINTS[p]      # her nokta bir kez, sırayla
+
+
+def test_kritik_yedi_bildirimle_sinirli():
+    """Eskiden aynı senaryo 34 bildirim üretiyordu."""
+    assert len(_bildirim_anlari(1, 10080)) == 7
+
+
+def test_yeni_kayit_hemen_bildirim_yollamaz():
+    """İki saat sonrasına kritik kurmak 'iki saat kaldı' bildirimi demek değil —
+    kullanıcı kaydı bir saniye önce kendi yazdı."""
+    assert _bildirim_anlari(1, 120) == [60, 15, 0, -15, -30]
+
+
+def test_vadesi_gecmis_kurulan_yine_de_bildirilir(db):
+    """'Saat 3'e kur' derken 3'ü on dakika geçmişse haber yine gelmeli.
+    `created_at` susturması yalnız vadeden ÖNCEKİ noktalar için geçerli."""
+    r = svc.create_reminder(db, SAHIP, "Geç kalmış", _in(-10), 4, "none")
+    assert any(x["id"] == r["id"] for x in svc.get_reminders_to_notify(db))
+
+
+def test_cok_gecmis_kayit_bildirim_listesinden_duser(db):
+    gec = -(svc.GIVE_UP_AFTER_MINUTES + 30)
+    r = svc.create_reminder(db, SAHIP, "Dünden kalma", _in(gec), 1, "none")
+    assert not any(x["id"] == r["id"] for x in svc.get_reminders_to_notify(db))
+
+
+def test_kacirilan_noktalar_tek_bildirime_iner():
+    """Sunucu kapalıyken birkaç nokta birden geçtiyse dönüşte üst üste bildirim
+    yığılmamalı; en dar nokta için tek haber gider."""
+    t0 = svc.now_local()
+    due = t0 + timedelta(minutes=5)
+    r = {
+        "due_datetime": due.isoformat(),
+        "priority": 1,
+        "last_notified_at": None,
+        "created_at": (t0 - timedelta(days=2)).isoformat(),   # 1440/180/60 kaçtı
+    }
+
+    assert svc.bildirim_gerekli(r, t0)
+    r["last_notified_at"] = t0.isoformat()
+    assert not svc.bildirim_gerekli(r, t0 + timedelta(minutes=1))
+
+
+def test_erteleme_hemen_geri_gelmez(db):
+    """Damga sıfırlansaydı yeni vade bir noktanın içine düşer ve bildirim,
+    erteleme tuşuna basıldıktan saniyeler sonra geri gelirdi."""
+    r = svc.create_reminder(db, SAHIP, "Test", _in(2), 1, "none")
+    svc.snooze_reminder(db, SAHIP, r["id"], 30)
+    db.commit()
+
+    assert not any(x["id"] == r["id"] for x in svc.get_reminders_to_notify(db))
+
+
+def test_tarih_duzenlemesi_hemen_bildirim_yollamaz(db):
+    """Panelden saati ileri almak da 'şimdi haber ver' anlamına gelmiyor."""
+    r = svc.create_reminder(db, SAHIP, "Test", _in(5), 1, "none")
+    svc.update_reminder(db, SAHIP, r["id"], due_datetime=_in(45))
+    db.commit()
+
+    assert not any(x["id"] == r["id"] for x in svc.get_reminders_to_notify(db))
 
 
 # ── Tekrarlama mantığı ───────────────────────────────────────────────────────

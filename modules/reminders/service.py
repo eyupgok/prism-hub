@@ -7,21 +7,26 @@ import pytz
 
 TZ = pytz.timezone("Europe/Istanbul")
 
-PRIORITY_NAMES = {1: "Kritik", 2: "Önemli", 3: "Normal"}
-PRIORITY_EMOJIS = {1: "🔴", 2: "🟡", 3: "🟢"}
+PRIORITY_NAMES = {1: "Kritik", 2: "Önemli", 3: "Normal", 4: "Sessiz"}
+PRIORITY_EMOJIS = {1: "🔴", 2: "🟡", 3: "🟢", 4: "🔇"}
 RECURRENCE_LABELS = {"daily": "Her gün", "weekly": "Her hafta", "monthly": "Her ay"}
 
+# Öncelik belirtilmemişse en sessiz seviye. Bilinçli bir tercih: hatırlatıcıyı
+# kuran kişi çoğu zaman "sesi ne kadar çıksın" diye düşünmüyor, sadece unutmak
+# istemiyor. Varsayılan gürültülü olursa her kayıt bildirim yağmuruna dönüşüyor;
+# gerçekten ısrar edilmesi gereken işi kullanıcı zaten kendi eliyle yükseltir.
+DEFAULT_PRIORITY = 4
 
 VALID_RECURRENCES = {"none", "daily", "weekly", "monthly"}
 
 
 def normalize_priority(priority: Any) -> int:
-    """1-3 aralığına sıkıştırır. Aralık dışı değer bildirim sıklığı hesabını
-    sessizce 'normal'e düşürüyordu; artık en yakın geçerli değere çekiliyor."""
+    """1-4 aralığına sıkıştırır. Aralık dışı değer bildirim planı hesabını
+    sessizce bozuyordu; artık en yakın geçerli değere çekiliyor."""
     try:
-        return max(1, min(int(priority), 3))
+        return max(1, min(int(priority), 4))
     except (TypeError, ValueError):
-        return 3
+        return DEFAULT_PRIORITY
 
 
 def normalize_recurrence(recurrence: Any) -> str:
@@ -58,28 +63,80 @@ def format_time_remaining(minutes: float) -> str:
     return f"{int(minutes / 1440)} gün kaldı"
 
 
-def get_notification_interval(priority: int, minutes_remaining: float) -> Optional[int]:
-    effective = max(0.0, minutes_remaining)
+# Bildirim anları: vadeye KAÇ DAKİKA KALA haber verilecek.
+# Eksi değer vadeden sonrasını gösterir (-30 = vade geçtikten 30 dk sonra).
+#
+# Eskiden burada "kalan süreye göre her N dakikada bir tekrarla" vardı; tekrarın
+# sonu olmadığı için tek bir kritik hatırlatıcı 34 bildirim üretebiliyordu ve
+# "sadece vaktinde bir kez haber ver" diye bir seçenek yazılamıyordu. Sabit
+# noktalarda kaç bildirim geleceği baştan belli: listenin uzunluğu kadar.
+#
+# Azalan sırada tutuluyor, `_aktif_nokta` en dar olanı seçiyor.
+NOTIFICATION_POINTS = {
+    1: [1440, 180, 60, 15, 0, -15, -30],   # Kritik  → 7 bildirim
+    2: [1440, 60, 0, -30],                 # Önemli  → 4
+    3: [60, 0],                            # Normal  → 2
+    4: [0],                                # Sessiz  → 1 (yalnız vadesinde)
+}
 
-    if priority == 1:
-        if effective <= 60:   return 15
-        if effective <= 180:  return 30
-        if effective <= 360:  return 60
-        if effective <= 1440: return 180
-        if effective <= 4320: return 360
-        if effective <= 10080: return 1440
-        return None
+# Vade bu kadar dakika geçtikten sonra hatırlatıcı bildirim listesinden düşer.
+# En geç bildirim noktasından (-30) sonrasına yer bırakıyor ki son nokta
+# sunucu birkaç dakika meşgulken kaçırılmasın.
+GIVE_UP_AFTER_MINUTES = 60
 
-    if priority == 2:
-        if effective <= 30:   return 15
-        if effective <= 180:  return 60
-        if effective <= 1440: return 360
-        if effective <= 4320: return 1440
-        return None
 
-    if effective <= 120:  return 60
-    if effective <= 1440: return 720
-    return None
+def get_notification_points(priority: int) -> List[int]:
+    return NOTIFICATION_POINTS.get(normalize_priority(priority), NOTIFICATION_POINTS[DEFAULT_PRIORITY])
+
+
+def _aktif_nokta(priority: int, minutes_remaining: float) -> Optional[int]:
+    """Şu an hangi bildirim noktasının içindeyiz? Varılmamışsa None.
+
+    Varılmış noktaların EN DARı seçilir — yani vadeye en yakın olanı. Sunucu
+    bir süre kapalı kalıp birkaç nokta birden geçilmişse tek bildirim gider,
+    üst üste yığılmaz.
+    """
+    varilan = [p for p in get_notification_points(priority) if minutes_remaining <= p]
+    return min(varilan) if varilan else None
+
+
+def bildirim_gerekli(reminder: Dict[str, Any], now: datetime) -> bool:
+    """Bu hatırlatıcı şu an bildirilmeli mi?
+
+    Tek bir damga hangi noktaların geçildiğini anlamaya yetiyor: damga anındaki
+    kalan süre şu anki noktadan büyükse o nokta henüz duyurulmamış demektir.
+    Böylece ayrı bir "hangi noktalar gönderildi" sütununa gerek kalmıyor.
+
+    Hiç bildirilmemiş kayıtlarda vadeden ÖNCEKİ noktalar için `created_at`'e
+    düşülüyor: kayıt kurulduğunda çoktan içinde olunan nokta "zaten biliniyor"
+    sayılıyor. Olmasaydı iki saat sonrasına kurulan kritik bir hatırlatıcı, daha
+    kaydedilir kaydedilmez "2 saat kaldı" bildirimi yollardı — kullanıcı onu bir
+    saniye önce kendi yazdı.
+
+    Vade anı ve sonrası bu kuralın dışında: hatırlatıcının varlık sebebi o an.
+    Vadesi geçmiş olarak kurulan kayıt ("saat 3'e kurayım" derken saat 3'ü on
+    dakika geçmişse) yine de haber vermeli.
+    """
+    due = parse_dt(reminder["due_datetime"])
+    kalan = (due - now).total_seconds() / 60
+
+    if kalan < -GIVE_UP_AFTER_MINUTES:
+        return False
+
+    nokta = _aktif_nokta(reminder["priority"], kalan)
+    if nokta is None:
+        return False
+
+    referans = reminder["last_notified_at"]
+    if not referans:
+        if nokta <= 0:
+            return True
+        referans = reminder.get("created_at")
+        if not referans:
+            return True
+
+    onceki_kalan = (due - parse_dt(referans)).total_seconds() / 60
+    return onceki_kalan > nokta
 
 
 def create_reminder(
@@ -87,7 +144,7 @@ def create_reminder(
     owner_id: int,
     title: str,
     due_datetime: str,
-    priority: int = 3,
+    priority: int = DEFAULT_PRIORITY,
     recurrence: str = "none",
 ) -> Dict[str, Any]:
     dt = parse_dt(due_datetime)
@@ -201,7 +258,10 @@ def update_reminder(
         fields.append("due_datetime = ?")
         fields.append("last_notified_at = ?")
         values.append(dt.isoformat())
-        values.append(None)
+        # Erteleme ile aynı gerekçe: damga ŞU AN'a çekiliyor, sıfırlanmıyor.
+        # Yeni vade zaten bir bildirim noktasının içine düşüyorsa, sıfır damga
+        # kaydı düzenler düzenlemez bildirim yollardı.
+        values.append(now_local().isoformat())
     if priority is not None:
         fields.append("priority = ?")
         values.append(normalize_priority(priority))
@@ -232,11 +292,16 @@ def snooze_reminder(
     if not reminder or reminder["owner_id"] != owner_id:
         return None
     minutes = max(MIN_SNOOZE_MINUTES, min(int(minutes), MAX_SNOOZE_MINUTES))
-    new_due = now_local() + timedelta(minutes=minutes)
+    now = now_local()
+    new_due = now + timedelta(minutes=minutes)
+    # Damga sıfırlanmıyor, ŞU ANA çekiliyor. Sıfırlansaydı sabit nokta modelinde
+    # yeni vade zaten bir noktanın içinde kalacağı için bildirim erteleme tuşuna
+    # basıldıktan hemen sonra geri gelirdi. Şimdiki damgayla nokta "duyurulmuş"
+    # sayılıyor ve sıra ertelemenin bittiği ana geliyor.
     conn.execute(
         "UPDATE reminders SET due_datetime = ?, snooze_count = snooze_count + 1, "
-        "last_notified_at = NULL WHERE id = ? AND owner_id = ?",
-        (new_due.isoformat(), reminder_id, owner_id),
+        "last_notified_at = ? WHERE id = ? AND owner_id = ?",
+        (new_due.isoformat(), now.isoformat(), reminder_id, owner_id),
     )
     return get_reminder_by_id(conn, reminder_id)
 
@@ -279,11 +344,13 @@ def reschedule_recurring(conn: sqlite3.Connection, reminder_id: int) -> Optional
     return get_reminder_by_id(conn, reminder_id)
 
 
-def reschedule_overdue_recurring(conn: sqlite3.Connection, older_than_minutes: int = 60) -> int:
+def reschedule_overdue_recurring(
+    conn: sqlite3.Connection, older_than_minutes: int = GIVE_UP_AFTER_MINUTES
+) -> int:
     """Bildirim penceresinden düşmüş tekrarlayan hatırlatıcıları ileri sarar.
 
-    `get_reminders_to_notify` vadesi 60 dakikadan fazla geçmiş kayıtları listeden
-    çıkarıyor (eski bildirimlerle boğmamak için). Ama ötelemeyi de o döngü yaptığı
+    `get_reminders_to_notify` vadesi `GIVE_UP_AFTER_MINUTES`'ten fazla geçmiş kayıtları
+    listeden çıkarıyor (eski bildirimlerle boğmamak için). Ama ötelemeyi de o döngü yaptığı
     için, sunucu bir saatten uzun kapalı kalırsa tekrarlayan hatırlatıcı hem
     bildirilmiyor hem de bir daha asla ötelenmiyordu — sessizce ölüyordu.
 
@@ -318,28 +385,10 @@ def get_reminders_to_notify(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """Bildirilecek hatırlatıcılar — HERKESİNKİ. Dönen her kayıtta `owner_id` var;
     zamanlayıcı ona bakıp bildirimi doğru kişinin Telegram'ına yolluyor."""
     now = now_local()
-    to_notify = []
-
-    for r in tum_hatirlaticilar(conn, include_completed=False):
-        due = parse_dt(r["due_datetime"])
-        minutes_remaining = (due - now).total_seconds() / 60
-
-        if minutes_remaining < -60:
-            continue
-
-        interval = get_notification_interval(r["priority"], minutes_remaining)
-        if interval is None:
-            continue
-
-        if r["last_notified_at"]:
-            last = parse_dt(r["last_notified_at"])
-            minutes_since = (now - last).total_seconds() / 60
-            if minutes_since < interval:
-                continue
-
-        to_notify.append(r)
-
-    return to_notify
+    return [
+        r for r in tum_hatirlaticilar(conn, include_completed=False)
+        if bildirim_gerekli(r, now)
+    ]
 
 
 def format_reminder_notification(reminder: Dict[str, Any]) -> Tuple[str, List]:

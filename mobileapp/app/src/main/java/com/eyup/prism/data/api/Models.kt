@@ -21,7 +21,7 @@ data class Reminder(
 data class ReminderCreate(
     val title: String,
     @SerializedName("due_datetime") val dueDatetime: String,
-    val priority: Int = 3,
+    val priority: Int = 4,   // Sessiz — sunucudaki DEFAULT_PRIORITY ile aynı
     val recurrence: String = "none",
 )
 

@@ -77,8 +77,10 @@ modules/
   reminders/
     models.py   → CREATE TABLE reminders (id, title, due_datetime, priority,
                    is_completed, last_notified_at, snooze_count, recurrence, created_at)
-    service.py  → CRUD + öncelik bazlı bildirim + snooze + tekrarlayan
+    service.py  → CRUD + snooze + tekrarlayan
                    (complete_reminder tekrarlayanı öldürmez, sonraki periyoda öteler)
+                   NOTIFICATION_POINTS = önceliğe göre sabit bildirim anları
+                   → "Hatırlatıcı Bildirim Planı" bölümü
     routes.py   → FastAPI router (/api/reminders/*, PUT update dahil)
   notes/
     models.py   → CREATE TABLE notes (id, title, content, category, created_at)
@@ -169,8 +171,12 @@ users        (id, ad, telegram_chat_id UNIQUE, parola_hash, created_at,
               → sehir/enlem/boylam NULL olabilir → env'deki WEATHER_* kullanılır
               → Göç: tablo boşken PANEL_PASSWORD + TELEGRAM_CHAT_ID'den id=1 yaratılır
 
-reminders    (owner_id, id, title, due_datetime, priority[1-3], is_completed,
+reminders    (owner_id, id, title, due_datetime, priority[1-4], is_completed,
               last_notified_at, snooze_count, recurrence[none|daily|weekly|monthly], created_at)
+              → priority: 1=Kritik 2=Önemli 3=Normal 4=Sessiz (varsayılan).
+                Kaç bildirim gideceğini belirler → "Hatırlatıcı Bildirim Planı"
+              → last_notified_at hangi bildirim noktasının duyurulduğunu da taşır;
+                sıfırlanmaz, ŞU AN'a çekilir (erteleme/tarih düzenlemesi)
 
 notes        (owner_id, id, title, content, category[iş|kişisel|genel|ders|fikir], created_at)
 
@@ -482,10 +488,49 @@ başkasının kaydını değiştirme denemesi 403, okuma serbest) ve **konum/hav
 (`test_konum.py`). Her test geçici veritabanı kullanır (`conftest.py`), gerçek
 `prism.db`'ye dokunulmaz.
 
-**Öncelik bazlı bildirim sıklığı** (`get_notification_interval()`):
-- Kritik (1): son 1 saatte 15 dk'da bir, 1-3 saatte 30 dk'da bir...
-- Önemli (2): son 30 dk'da 15 dk'da bir, 30-180 dk'da saatte bir...
-- Normal (3): son 2 saatte saatte bir, 2-24 saatte 12 saatte bir
+## Hatırlatıcı Bildirim Planı
+
+**Öncelik = kaç bildirim geleceği.** Sıklık değil, sabit noktalar
+(`service.NOTIFICATION_POINTS`): vadeye kaç dakika kala haber verileceği yazılı,
+eksi değer vadeden sonrasını gösterir.
+
+| Öncelik | Bildirim anları | Toplam |
+|---|---|---|
+| 🔇 Sessiz (4) — **varsayılan** | vade anı | **1** |
+| 🟢 Normal (3) | 1 sa kala · vade anı | 2 |
+| 🟡 Önemli (2) | 1 gün · 1 sa kala · vade anı · +30 dk | 4 |
+| 🔴 Kritik (1) | 1 gün · 3 sa · 1 sa · 15 dk kala · vade anı · +15 · +30 dk | 7 |
+
+⚠️ **Eskiden "kalan süreye göre her N dakikada bir tekrarla" vardı.** Tekrarın sonu
+olmadığı için bir hafta önceden kurulan tek bir kritik hatırlatıcı **34 bildirim**
+üretiyordu ve "sadece vaktinde bir kez haber ver" diye bir seçenek yazılamıyordu.
+Sabit noktalarda üst sınır listenin uzunluğu kadar; `tests/test_reminders.py`
+her seviyenin tam olarak kendi listesini ürettiğini kilitliyor.
+
+**Varsayılan neden en sessiz seviye:** hatırlatıcıyı kuran kişi çoğu zaman "sesi ne
+kadar çıksın" diye düşünmüyor, sadece unutmak istemiyor. Varsayılan gürültülü olunca
+her kayıt bildirim yağmuruna dönüyordu. Gerçekten ısrar edilmesi gereken işi kullanıcı
+zaten kendi eliyle yükseltiyor. Varsayılan **dört yerde birden** aynı olmalı:
+`service.DEFAULT_PRIORITY`, `routes.ReminderCreate`, `ai_router` yönergesi +
+`dispatch()`, ve Android `ReminderCreate`.
+
+**Hangi noktanın duyurulduğu ayrı sütunda tutulmuyor.** `last_notified_at` tek damga
+ama yetiyor: damga anındaki kalan süre şu anki noktadan büyükse o nokta henüz
+duyurulmamış demektir. Bunun üç sonucu var, üçü de bilinçli:
+
+- **Yeni kayıt hemen bildirim yollamaz.** Damga yoksa `created_at`'e düşülüyor, yani
+  kayıt kurulduğunda çoktan içinde olunan nokta "zaten biliniyor" sayılıyor. Olmasaydı
+  iki saat sonrasına kurulan kritik bir hatırlatıcı, daha kaydedilir kaydedilmez
+  "2 saat kaldı" derdi.
+- **Vade anı ve sonrası bu kuralın dışında** — vadesi geçmiş olarak kurulan kayıt
+  ("saat 3'e kur" derken 3'ü on dakika geçmişse) yine de haber verir.
+- **Erteleme ve tarih düzenlemesi damgayı sıfırlamaz, ŞU AN'a çeker.** Sıfırlasaydı
+  yeni vade bir noktanın içine düşer ve bildirim tuşa basıldıktan saniyeler sonra
+  geri gelirdi.
+
+Vadesi `GIVE_UP_AFTER_MINUTES` (60 dk) geçen kayıt listeden düşer;
+`reschedule_overdue_recurring()` aynı sabiti kullanıyor — ikisi ayrışırsa tekrarlayan
+hatırlatıcılar sessizce ölür.
 
 ## Environment Variables
 

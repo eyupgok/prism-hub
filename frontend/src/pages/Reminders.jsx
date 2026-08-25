@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Check, Clock, Trash2, Bell, RefreshCw } from 'lucide-react'
+import { Plus, Check, Clock, Trash2, Bell, RefreshCw, Pencil } from 'lucide-react'
 import { api } from '../api/client'
 import Modal from '../components/Modal'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -9,9 +9,21 @@ const PRIORITY_BADGE = {
   1: 'text-red-400 bg-red-400/10 border-red-400/30',
   2: 'text-amber-400 bg-amber-400/10 border-amber-400/30',
   3: 'text-green-400 bg-green-400/10 border-green-400/30',
+  4: 'text-slate-400 bg-slate-400/10 border-slate-400/30',
 }
-const PRIORITY_DOT = { 1: 'bg-red-400', 2: 'bg-amber-400', 3: 'bg-green-400' }
-const PRIORITY_LABEL = { 1: 'Kritik', 2: 'Önemli', 3: 'Normal' }
+const PRIORITY_DOT = { 1: 'bg-red-400', 2: 'bg-amber-400', 3: 'bg-green-400', 4: 'bg-slate-500' }
+const PRIORITY_LABEL = { 1: 'Kritik', 2: 'Önemli', 3: 'Normal', 4: 'Sessiz' }
+
+// Öncelik = kaç bildirim geleceği. Seçim kutusunda sadece "Kritik / Önemli" yazsa
+// aradaki farkın ne olduğu tahmine kalıyordu; planı açıkça yazınca insan ne
+// seçtiğini biliyor. Sıra backend'deki NOTIFICATION_POINTS ile aynı.
+const PRIORITY_OPTIONS = [
+  { value: 4, label: '🔇 Sessiz', plan: 'Yalnız tam vaktinde — 1 bildirim' },
+  { value: 3, label: '🟢 Normal', plan: '1 saat kala + vaktinde — 2 bildirim' },
+  { value: 2, label: '🟡 Önemli', plan: '1 gün / 1 saat kala, vaktinde, 30 dk sonra — 4 bildirim' },
+  { value: 1, label: '🔴 Kritik', plan: '1 gün / 3 saat / 1 saat / 15 dk kala, vaktinde, +15, +30 dk — 7 bildirim' },
+]
+
 const RECURRENCE_LABEL = { none: null, daily: 'Günlük', weekly: 'Haftalık', monthly: 'Aylık' }
 
 const FILTERS = [
@@ -19,9 +31,17 @@ const FILTERS = [
   { id: '1', label: '🔴 Kritik' },
   { id: '2', label: '🟡 Önemli' },
   { id: '3', label: '🟢 Normal' },
+  { id: '4', label: '🔇 Sessiz' },
   { id: 'recurring', label: '🔄 Tekrarlananlar' },
   { id: 'done', label: '✅ Tamamlananlar' },
 ]
+
+/** ISO tarihi <input type="datetime-local"> biçimine çevirir (yerel saatte). */
+function toLocalInput(iso) {
+  const d = new Date(iso)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
 
 function timeLeft(dueStr) {
   const diff = new Date(dueStr) - new Date()
@@ -44,7 +64,10 @@ export default function Reminders() {
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ title: '', due_datetime: '', priority: 3, recurrence: 'none' })
+  // null → ekleme, id → o kaydı düzenleme. Aynı modal ikisini de karşılıyor;
+  // alanlar birebir aynı olduğu için ayrı bir bileşen kopyası tutmak gereksiz.
+  const [editId, setEditId] = useState(null)
+  const [form, setForm] = useState({ title: '', due_datetime: '', priority: 4, recurrence: 'none' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -67,12 +90,32 @@ export default function Reminders() {
 
   const activeCount = items.filter(r => !r.is_completed).length
 
-  const handleCreate = async (e) => {
+  const openCreate = () => {
+    setEditId(null)
+    setForm({ title: '', due_datetime: defaultDT(), priority: 4, recurrence: 'none' })
+    setError(null)
+    setShowModal(true)
+  }
+
+  const openEdit = (r) => {
+    setEditId(r.id)
+    setForm({
+      title: r.title,
+      due_datetime: toLocalInput(r.due_datetime),
+      priority: r.priority,
+      recurrence: r.recurrence || 'none',
+    })
+    setError(null)
+    setShowModal(true)
+  }
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
     setError(null)
     try {
-      await api.createReminder(form)
+      if (editId === null) await api.createReminder(form)
+      else await api.updateReminder(editId, form)
       setShowModal(false)
       load()
     } catch (e) {
@@ -109,10 +152,7 @@ export default function Reminders() {
           <p className="text-slate-500 text-sm mt-1">{activeCount} aktif</p>
         </div>
         {!saltOkunur && (
-          <button
-            onClick={() => { setShowModal(true); setForm({ title: '', due_datetime: defaultDT(), priority: 3, recurrence: 'none' }) }}
-            className="btn-primary"
-          >
+          <button onClick={openCreate} className="btn-primary">
             <Plus size={16} />
             Yeni
           </button>
@@ -188,6 +228,13 @@ export default function Reminders() {
                 {!r.is_completed && !saltOkunur && (
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button
+                      onClick={() => openEdit(r)}
+                      title="Düzenle"
+                      className="p-1.5 text-slate-600 hover:text-purple-400 hover:bg-purple-400/10 rounded-lg transition-colors"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
                       onClick={() => handleSnooze(r.id, 15)}
                       title="15 dk ertele"
                       className="p-1.5 text-slate-600 hover:text-amber-400 hover:bg-amber-400/10 rounded-lg transition-colors"
@@ -225,10 +272,13 @@ export default function Reminders() {
         </div>
       )}
 
-      {/* Create Modal */}
+      {/* Ekleme / düzenleme */}
       {showModal && (
-        <Modal title="Yeni Hatırlatıcı" onClose={() => setShowModal(false)}>
-          <form onSubmit={handleCreate} className="space-y-4">
+        <Modal
+          title={editId === null ? 'Yeni Hatırlatıcı' : 'Hatırlatıcıyı Düzenle'}
+          onClose={() => setShowModal(false)}
+        >
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs text-slate-500 mb-1.5">Başlık</label>
               <input
@@ -257,10 +307,13 @@ export default function Reminders() {
                 onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))}
                 className="select-field"
               >
-                <option value={1}>🔴 Kritik</option>
-                <option value={2}>🟡 Önemli</option>
-                <option value={3}>🟢 Normal</option>
+                {PRIORITY_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
+              <p className="text-xs text-slate-600 mt-1.5">
+                {PRIORITY_OPTIONS.find(o => o.value === form.priority)?.plan}
+              </p>
             </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1.5">Tekrar</label>
@@ -279,7 +332,7 @@ export default function Reminders() {
             <div className="flex gap-3 pt-1">
               <button type="button" onClick={() => setShowModal(false)} className="btn-secondary flex-1">İptal</button>
               <button type="submit" disabled={saving} className="btn-primary flex-1">
-                {saving ? 'Kaydediliyor...' : 'Ekle'}
+                {saving ? 'Kaydediliyor...' : editId === null ? 'Ekle' : 'Kaydet'}
               </button>
             </div>
           </form>

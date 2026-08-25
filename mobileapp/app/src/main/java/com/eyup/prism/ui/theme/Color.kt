@@ -15,8 +15,10 @@ val PrismRed = Color(0xFFF87171)
 val PrismAmber = Color(0xFFFBBF24)
 val PrismGreen = Color(0xFF4ADE80)
 
-// Öncelik: 1=Kritik 2=Önemli 3=Normal
-val PriorityColors = mapOf(1 to PrismRed, 2 to PrismAmber, 3 to PrismGreen)
+val PrismSlate = Color(0xFF64748B)
+
+// Öncelik: 1=Kritik 2=Önemli 3=Normal 4=Sessiz (varsayılan)
+val PriorityColors = mapOf(1 to PrismRed, 2 to PrismAmber, 3 to PrismGreen, 4 to PrismSlate)
 
 // Harcama kategorileri (web panel Expenses.jsx ile aynı renkler)
 val CategoryColors = mapOf(

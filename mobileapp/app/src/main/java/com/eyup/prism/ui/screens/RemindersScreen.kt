@@ -78,7 +78,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
-private val PRIORITY_LABELS = mapOf(1 to "Kritik", 2 to "Önemli", 3 to "Normal")
+private val PRIORITY_LABELS = mapOf(1 to "Kritik", 2 to "Önemli", 3 to "Normal", 4 to "Sessiz")
 private val RECURRENCE_LABELS = mapOf("daily" to "Günlük", "weekly" to "Haftalık", "monthly" to "Aylık")
 
 class RemindersViewModel : ViewModel() {
@@ -273,7 +273,7 @@ private fun CreateReminderDialog(onDismiss: () -> Unit, onCreate: (ReminderCreat
     var title by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(LocalDate.now()) }
     var time by remember { mutableStateOf(LocalTime.of(9, 0)) }
-    var priority by remember { mutableStateOf(3) }
+    var priority by remember { mutableStateOf(4) }
     var recurrence by remember { mutableStateOf("none") }
 
     AlertDialog(
@@ -311,7 +311,7 @@ private fun CreateReminderDialog(onDismiss: () -> Unit, onCreate: (ReminderCreat
                 }
                 Text("Öncelik", color = PrismTextMuted, fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(1 to "🔴 Kritik", 2 to "🟡 Önemli", 3 to "🟢 Normal").forEach { (value, label) ->
+                    listOf(4 to "🔇 Sessiz", 3 to "🟢 Normal", 2 to "🟡 Önemli", 1 to "🔴 Kritik").forEach { (value, label) ->
                         FilterChip(
                             selected = priority == value,
                             onClick = { priority = value },
