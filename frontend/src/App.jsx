@@ -7,6 +7,7 @@ import Notes from './pages/Notes'
 import Expenses from './pages/Expenses'
 import Settings from './pages/Settings'
 import Sohbet from './pages/Sohbet'
+import Özel sayfa from './pages/Özel sayfa'
 import Login from './pages/Login'
 import KisiSeridi from './components/KisiSeridi'
 import { KullaniciProvider, useKullanici } from './kullanici'
@@ -93,6 +94,10 @@ export default function App() {
 function Kabuk({ page, setPage }) {
   const { bakilan } = useKullanici()
   const Page = PAGES[page] || Dashboard
+
+  // Özel sayfa kabuğun DIŞINDA: kendi teması ve tam ekran kurgusu var, kenar
+  // çubuğuyla alt gezinmenin arasına sıkışırsa bütün etkisi gidiyor.
+  if (page === 'özel sayfa') return <Özel sayfa onClose={() => setPage('dashboard')} />
 
   return (
     <div className="min-h-screen bg-[#0a0a0f]">

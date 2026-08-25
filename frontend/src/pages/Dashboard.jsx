@@ -4,6 +4,7 @@ import LiraSign from '../components/LiraSign'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { api } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
+import OzelKarti from '../components/OzelKarti'
 import { useKullanici } from '../kullanici'
 
 function useNow() {
@@ -76,8 +77,10 @@ const PRIORITY_BADGE = {
   1: 'text-red-400 bg-red-400/10 border-red-400/30',
   2: 'text-amber-400 bg-amber-400/10 border-amber-400/30',
   3: 'text-green-400 bg-green-400/10 border-green-400/30',
+  4: 'text-slate-400 bg-slate-400/10 border-slate-400/30',
 }
-const PRIORITY_LABEL = { 1: 'Kritik', 2: 'Önemli', 3: 'Normal' }
+const PRIORITY_DOT = { 1: 'bg-red-400', 2: 'bg-amber-400', 3: 'bg-green-400', 4: 'bg-slate-500' }
+const PRIORITY_LABEL = { 1: 'Kritik', 2: 'Önemli', 3: 'Normal', 4: 'Sessiz' }
 
 // Tailwind sınıf adlarını kaynakta birebir arar — `stagger-${i}` gibi birleştirilmiş
 // adları göremez ve kuralları çıktıdan siler. O yüzden düz liste.
@@ -184,6 +187,10 @@ export default function Dashboard({ onNavigate }) {
         </div>
       </div>
 
+      {/* Selamlamanın hemen altında: telefonda ilk ekranda görünsün diye.
+          Veri beklemiyor, `loading` bloğunun dışında duruyor. */}
+      <OzelKarti onAc={() => onNavigate('özel sayfa')} />
+
       {error && (
         <div className="p-4 rounded-xl border text-sm text-red-400"
           style={{ background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.25)' }}>
@@ -259,9 +266,7 @@ export default function Dashboard({ onNavigate }) {
                     return (
                       <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl transition-colors"
                         style={{ background: 'rgba(255,255,255,0.03)' }}>
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                          r.priority === 1 ? 'bg-red-400' : r.priority === 2 ? 'bg-amber-400' : 'bg-green-400'
-                        }`} />
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${PRIORITY_DOT[r.priority]}`} />
                         <span className={`text-xs px-2 py-0.5 rounded-full border flex-shrink-0 ${PRIORITY_BADGE[r.priority]}`}>
                           {PRIORITY_LABEL[r.priority]}
                         </span>

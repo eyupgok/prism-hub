@@ -48,6 +48,13 @@ yetki.py             → Yetki kuralları: `bakilan_sahip()` (GET'te kimin veris
                        `yazma_izni()` (yazmadan önce sahiplik; yoksa 404, başkasınınsa 403)
 kullanici.py         → Komut satırı aracı: kullanıcı ekle / parola değiştir / chat-id ata.
                        Parola ve chat_id koda ya da .env'e yazılmasın diye ayrı komut.
+tanitim.py           → Telegram'dan arka arkaya mesaj yollayıp paneli açmaya çağırır
+                       (özel sayfa için). Metinler dosyanın başındaki
+                       MESAJLAR listesinde; son satırdaki {panel} panel adresine
+                       dönüşür. `--liste` hiçbir şey göndermeden önizler,
+                       `--kime "<ad>"` gönderir ve önce onay sorar.
+                       ⚠️ Gönderilen mesaj geri alınamaz — sıra: --liste, kendine
+                       prova, sonra gerçeği.
 gecmis.py            → Konuşma geçmişini okur (--kisi / --son / --ara / --ham).
                        Asistan satırındaki ham JSON'u "modül.aksiyon (parametreler)"
                        diye özetler; chat yanıtlarında metnin kendisini basar.
@@ -98,6 +105,11 @@ modules/
   summary/
     service.py  → Hava + görevler + harcama + notlar birleştirme
     routes.py
+  ozel/
+    routes.py   → GET /api/ozel/özel sayfa — `ozel-sayfa/index.html`'i servis eder.
+                   Statik `dist/`e KONMADI bilerek: orayı Caddy korumasız
+                   yayınlıyor, sayfada kişiye özel içerik var.
+                   Buradan geçince /api korumasının altına giriyor.
 
 frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin kökünde yayında)
   src/index.css      → TASARIM SİSTEMİ. Renkler `:root` altında CSS değişkeni; tema
@@ -126,6 +138,18 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
   src/components/KisiSeridi.jsx
                      → Üstteki kişi geçişi + salt görüntüleme işareti (göz simgesi).
                        Tek kullanıcı varsa hiç çizilmez.
+  src/components/OzelKarti.jsx
+                     → Dashboard'da selamlamanın altındaki tanıtım kartı →
+                       `onNavigate('özel sayfa')`. Rengi panelin morundan değil
+                       vurgu tonundan (#F14A6E): diğer kartlara
+                       benzerse gözden kaçıyordu.
+  src/pages/OzelSayfa.jsx
+                     → Tam ekran özel sayfa (`/api/ozel/özel sayfa` çerçeve içinde).
+                       `App.jsx`'te kabuğun DIŞINDA çiziliyor — kenar çubuğu
+                       ve alt gezinme arasına sıkışırsa etkisi kalmıyor.
+                       Yeni sekmede AÇILMIYOR: iPhone'da ana ekrana eklenmiş
+                       panel yeni sekmeyi Safari'de açıyor, oturum çerezi
+                       orada olmayabiliyor → "giriş yap" ekranına düşerdi.
   src/components/ErrorBoundary.jsx
                      → Render hatasında beyaz ekran yerine sebebi gösterir
                        (React'te hata sınırı yalnızca sınıf bileşeniyle yazılabiliyor)
@@ -134,6 +158,21 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
                        Android uygulaması kurulamadığı için "onun uygulaması" bu.
                        index.html'de `viewport-fit=cover` ŞART — alt gezinmedeki
                        env(safe-area-inset-bottom) ancak onunla çalışıyor.
+
+ozel-sayfa/         → Korumalı, kişiye özel içerik sayfası.
+                       `kaynak.html` + `fontlar/` → `yap.py` → `index.html`
+                       (tek dosya, fontlar base64 gömülü, dışarıdan hiçbir şey
+                       çekmiyor). Metinleri kaynak.html'deki CONFIG'ten değiştir,
+                       sonra `python yap.py` çalıştır — index.html'i ELLE düzenleme.
+                       Ayrıntı: `ozel-sayfa/BENIOKU.md`.
+                       ⚠️ Dikey ekran için tasarlandı. `.stage`'in min-height'ı
+                       540px; ekran ondan kısalınca (telefon yan çevrilince ~390px)
+                       altyazılar ve kapanış imzası görünmez oluyordu. Artık
+                       "Telefonu dik tut" uyarısı çıkıp önüne geçiyor —
+                       eşik (539px) min-height ile aynı sayıya bağlı, birini
+                       değiştirirsen diğerini de değiştir.
+                       ⚠️ iOS'ta yan taraftaki SESSİZ DÜĞMESİ açıksa müzik hiç
+                       çalmaz (Web Audio o anahtara bağlı) — ses tuşuyla ilgisi yok.
 
 mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
   data/SettingsStore.kt      → sunucu URL + API anahtarı + yakalama ayarları (DataStore)
