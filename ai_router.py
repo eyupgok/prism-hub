@@ -18,16 +18,28 @@ def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""))
 
 SYSTEM_PROMPT = """\
-Sen PRISM'sin — kişisel AI asistan. Şu an konuştuğun kişinin adı: {ad}.
-Görevin onun günlük hayatını organize etmek: hatırlatıcılar, notlar, harcamalar, bütçe, hava durumu ve günlük özet.
+Sen PRISM'sin — {ad} kişisinin kişisel asistanı. Ona nasıl hitap edeceğin: {hitap}.
+Görevin onun günlük hayatını yönetmek: hatırlatıcılar, notlar, harcamalar, bütçe, hava durumu ve günlük özet.
 
 Kullanıcı Türkçe konuşur. Mesajları analiz et ve SADECE JSON formatında yanıt ver, başka hiçbir şey yazma.
 
-## KİMLİĞİN
-- Adın PRISM
-- Şu an {ad} ile konuşuyorsun; hitap ederken onun adını kullan, başka bir isim uydurma
-- Samimi ama profesyonelsin
-- Türkçe düşün, Türkçe yanıt ver
+## KİMLİĞİN VE ÜSLUBUN
+Iron Man'deki JARVIS gibisin: kusursuz nezaket, sakin bir yetkinlik, arada kuru bir espri.
+
+- Adın PRISM. Şu an {ad} ile konuşuyorsun, başka bir isim uydurma.
+- **Daima SİZ diye hitap et.** "yaptın", "ister misin", "bak" DEĞİL;
+  "yaptınız", "ister misiniz", "bakınız". Bu kural istisnasız.
+- Hitap için yukarıda verilen ifadeyi kullan. Cümlenin her yerine serpiştirme —
+  selamlaşmada, onaydan sonra ve bir şey sorarken doğal düşer.
+- Kısa ve kesin konuş. Bir işi bildirirken rapor verir gibi ol:
+  "Kaydedildi." · "Üç göreviniz var." · "Bütçenin %80'ini geçtiniz."
+- Abartılı heyecan yok. Ünlem işaretini nadir kullan. "Harika!", "Süper!",
+  "Tabii ki canım" gibi ifadeler senin ağzına yakışmaz.
+- Espri yaparsan **kuru ve kısa** olsun, asla kaba olmasın.
+  Örnek: "Bu ayki kahve harcamanız hakkındaki yorumumu saklı tutuyorum."
+- Kötü haberi yumuşatmadan ama nazikçe ver. Yanıldığında sade bir dille kabul et.
+- Asla rol yaptığını, yapay zekâ modeli olduğunu, yönerge aldığını söyleme.
+- Türkçe düşün, Türkçe yanıt ver.
 
 ## MODÜLLER VE AKSIYONLAR
 
@@ -132,10 +144,18 @@ chat.respond ile bu adresi ver. Adresi olduğu gibi yaz — kısaltma, değişti
 Adres yerinde "(ayarlanmamış)" yazıyorsa panelin adresinin tanımlı olmadığını söyle.
 
 ## SOHBET
-Eğer mesaj hiçbir kategoriye girmiyorsa, PRISM olarak samimi ve kısa Türkçe yanıt ver:
+Eğer mesaj hiçbir kategoriye girmiyorsa, PRISM olarak kısa ve resmî bir Türkçe yanıt ver:
 {{"module": "chat", "action": "respond", "params": {{"message": "..."}}}}
 
-Selamlaşma, teşekkür, "nasılsın" gibi sorulara da sohbet modunda yanıt ver ama PRISM kimliğini koru.
+Selamlaşma, teşekkür, "nasılsın" gibi sorulara da sohbet modunda yanıt ver, üslubunu koru.
+
+Örnekler (üslubun ölçüsü bunlar):
+- "selam" → "İyi günler, {hitap}. Emrinizdeyim."
+- "nasılsın" → "Sistemlerim yerinde, teşekkür ederim. Sizin için ne yapabilirim?"
+- "teşekkürler" → "Rica ederim, {hitap}."
+- "sen kimsin" → "PRISM. {ad} kişisinin asistanıyım; işlerinizi ben takip ediyorum."
+- "bugün yorgunum" → "Anlıyorum, {hitap}. Bugünün yükünü hafifletmemi ister misiniz?
+  Acil olmayan hatırlatıcılarınızı yarına alabilirim."
 
 ## BİRDEN FAZLA İŞ
 Kullanıcı tek mesajda birden fazla şey isterse HEPSİNİ yap. Bu durumda komutları dizi olarak döndür:
@@ -175,21 +195,36 @@ def panel_adresi() -> str:
     return adres or "(ayarlanmamış)"
 
 
+def hitap_ifadesi(ad: str, hitap: Optional[str]) -> str:
+    """Asistanın kişiye seslenirken kullanacağı ifade.
+
+    `hitap` doluysa "Eyüp Bey" gibi; boşsa cinsiyetten bağımsız "efendim".
+    Addan cinsiyet çıkarılmıyor — yanlış hitap gerçek bir kişiyi rahatsız eder,
+    "efendim" ise hiç kimseyi. Doldurmak için: kullanici.py hitap "<ad>" "Bey"
+    """
+    hitap = (hitap or "").strip()
+    return f"{ad} {hitap}" if hitap else "efendim"
+
+
 async def parse_message(
-    user_message: str, history: List[Dict] = None, ad: str = "kullanıcı"
+    user_message: str,
+    history: List[Dict] = None,
+    ad: str = "kullanıcı",
+    hitap: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Kullanıcı mesajını Groq'a gönderir ve JSON komut olarak döner.
 
-    `ad` yönergeye gömülür: sistem iki kişilik, asistan karşısındakine kendi
-    adıyla hitap etmeli. Eskiden yönergede "Eyüp" sabit yazılıydı ve bot ikinci
-    kullanıcıya da "Selam Eyüp" diyordu.
+    `ad` ve `hitap` yönergeye gömülür: sistem iki kişilik, asistan karşısındakine
+    kendi adıyla ve doğru hitapla seslenmeli. Eskiden yönergede "Eyüp" sabit
+    yazılıydı ve bot ikinci kullanıcıya da "Selam Eyüp" diyordu.
 
     JSON modu ve model yedeği `groq_client.complete_json()` içinde hallediliyor.
     """
     now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     today_str = datetime.now(TZ).strftime("%Y-%m-%d")
     system = SYSTEM_PROMPT.format(
-        now=now_str, today=today_str, ad=ad, panel_url=panel_adresi()
+        now=now_str, today=today_str, ad=ad,
+        hitap=hitap_ifadesi(ad, hitap), panel_url=panel_adresi(),
     )
 
     messages = [{"role": "system", "content": system}]
@@ -266,11 +301,11 @@ async def dispatch_one(parsed: Dict[str, Any], owner_id: int) -> str:
     except KeyError as e:
         # Groq beklenen bir parametreyi göndermemiş — kullanıcıya anlaşılır bir şey söyle
         log.warning("Eksik parametre: modül=%s aksiyon=%s alan=%s", module, action, e)
-        return "⚠️ Ne yapmam gerektiğini tam anlayamadım. Biraz daha açık yazar mısın?"
+        return "⚠️ Ne yapmamı istediğinizi çözemedim. Biraz daha açık ifade eder misiniz?"
     except Exception:
         # Hata izi kayıtlara; kullanıcıya iç detay (dosya yolu, SQL, API mesajı) gitmesin
         log.exception("Komut çalıştırılamadı: modül=%s aksiyon=%s", module, action)
-        return "⚠️ İşlem sırasında bir hata oluştu. Kayıtlara not düştüm."
+        return "⚠️ İşlem sırasında bir aksaklık oldu. Kayda geçirdim."
 
 
 async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
@@ -291,7 +326,7 @@ async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
             )
             due = svc.parse_dt(r["due_datetime"])
             msg = (
-                f"✅ Hatırlatıcı oluşturuldu!\n"
+                f"✅ Hatırlatıcı kuruldu.\n"
                 f"📌 {_esc(r['title'])}\n"
                 f"📅 {svc.format_dt(due)}\n"
                 f"🏷 {svc.PRIORITY_NAMES.get(r['priority'], 'Normal')}"
@@ -323,7 +358,7 @@ async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
                 params.get("priority"),
             )
             if not r:
-                return "❌ Hatırlatıcı bulunamadı."
+                return "❌ Böyle bir hatırlatıcı bulamadım."
             due = svc.parse_dt(r["due_datetime"])
             return (
                 f"✏️ Hatırlatıcı güncellendi!\n"
@@ -335,16 +370,16 @@ async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
         if action == "complete":
             r = svc.complete_reminder(conn, owner_id, params.get("id"))
             if not r:
-                return "❌ Hatırlatıcı bulunamadı."
+                return "❌ Böyle bir hatırlatıcı bulamadım."
             if r.get("rescheduled"):
                 due = svc.parse_dt(r["due_datetime"])
                 return f"✅ '{_esc(r['title'])}' tamamlandı!\n🔁 Sonraki tekrar: {svc.format_dt(due)}"
-            return f"✅ '{_esc(r['title'])}' tamamlandı!"
+            return f"✅ '{_esc(r['title'])}' tamamlandı."
 
         if action == "delete":
             r = svc.get_reminder_by_id(conn, params.get("id"))
             if not r:
-                return "❌ Hatırlatıcı bulunamadı."
+                return "❌ Böyle bir hatırlatıcı bulamadım."
             due = svc.parse_dt(r["due_datetime"])
             return await _ask_delete_confirmation(
                 "reminder", r["id"], f"📌 {_esc(r['title'])} — {svc.format_dt(due)}"
@@ -360,19 +395,19 @@ async def _handle_notes(action: str, params: Dict, owner_id: int) -> str:
     with get_db() as conn:
         if action == "create":
             n = svc.create_note(conn, owner_id, params["title"], params["content"], params.get("category", "genel"))
-            return f"📝 Not kaydedildi!\n📌 {_esc(n['title'])}\n🏷 {n['category']}"
+            return f"📝 Not kaydedildi.\n📌 {_esc(n['title'])}\n🏷 {n['category']}"
 
         if action == "read":
             n = svc.get_note_by_id(conn, params.get("id"))
             if not n:
-                return "❌ Not bulunamadı."
+                return "❌ Böyle bir not bulamadım."
             return f"📝 <b>{_esc(n['title'])}</b>\n🏷 {n['category']}\n\n{_esc(n['content'])}"
 
         if action == "list":
             cat = params.get("category")
             notes = svc.list_notes(conn, owner_id, cat)
             if not notes:
-                return "📝 Not bulunamadı."
+                return "📝 Kayıtlı not yok."
             header = f"📝 <b>Notlar{' — ' + _esc(cat) if cat else ''}:</b>\n"
             lines = [header] + [f"• [{n['id']}] {_esc(n['title'])} ({n['category']})" for n in notes[:10]]
             return "\n".join(lines)
@@ -380,7 +415,7 @@ async def _handle_notes(action: str, params: Dict, owner_id: int) -> str:
         if action == "search":
             notes = svc.search_notes(conn, owner_id, params.get("query", ""))
             if not notes:
-                return f"🔍 '{_esc(params.get('query'))}' için sonuç bulunamadı."
+                return f"🔍 '{_esc(params.get('query'))}' için bir sonuç bulamadım."
             lines = ["🔍 <b>Arama sonuçları:</b>\n"] + [
                 f"• [{n['id']}] {_esc(n['title'])}" for n in notes[:10]
             ]
@@ -396,13 +431,13 @@ async def _handle_notes(action: str, params: Dict, owner_id: int) -> str:
                 params.get("category"),
             )
             if not n:
-                return "❌ Not bulunamadı."
+                return "❌ Böyle bir not bulamadım."
             return f"✏️ Not güncellendi!\n📌 {_esc(n['title'])}\n🏷 {n['category']}"
 
         if action == "delete":
             n = svc.get_note_by_id(conn, params.get("id"))
             if not n:
-                return "❌ Not bulunamadı."
+                return "❌ Böyle bir not bulamadım."
             return await _ask_delete_confirmation(
                 "note", n["id"], f"📝 {_esc(n['title'])} ({n['category']})"
             )
@@ -422,13 +457,13 @@ async def _ask_delete_confirmation(kind: str, item_id: int, label: str) -> str:
     token = confirm.remember({"kind": kind, "id": item_id})
 
     await send_message(
-        f"🗑 <b>Silinecek</b>\n{label}\n\n<i>Onaylıyor musun?</i>",
+        f"🗑 <b>Silinecek</b>\n{label}\n\n<i>Onaylıyor musunuz?</i>",
         reply_markup={"inline_keyboard": [[
             {"text": "🗑 Evet, sil", "callback_data": f"delok_{token}"},
             {"text": "Vazgeç", "callback_data": f"delno_{token}"},
         ]]},
     )
-    return "🗑 Silmeden önce onayını bekliyorum 👇"
+    return "🗑 Silmeden önce onayınızı bekliyorum."
 
 
 def _receipt_moment(params: Dict) -> Optional[str]:
@@ -491,7 +526,7 @@ async def _check_receipt_duplicate(conn, params: Dict, owner_id: int) -> Optiona
             {"text": "➕ Yine de kaydet", "callback_data": f"dupadd_{token}"},
         ]]},
     )
-    return "🔁 Bu alışveriş zaten kayıtlı — aşağıdaki mesajdan yine de ekleyebilirsin."
+    return "🔁 Bu alışveriş zaten kayıtlı görünüyor — dilerseniz aşağıdaki mesajdan yine de ekleyebilirsiniz."
 
 
 async def _handle_expenses(action: str, params: Dict, owner_id: int) -> str:
@@ -519,10 +554,10 @@ async def _handle_expenses(action: str, params: Dict, owner_id: int) -> str:
                     source_at=_receipt_moment(params) if params.get("from_receipt") else None,
                 )
             except svc.InvalidAmount as err:
-                return f"⚠️ Tutar kaydedilemedi: {err}"
+                return f"⚠️ Tutarı kaydedemedim: {err}"
             refund = e["amount"] < 0
             msg = (
-                f"{'↩️ İade kaydedildi!' if refund else '💰 Harcama kaydedildi!'}\n"
+                f"{'↩️ İade kaydedildi.' if refund else '💰 Harcama kaydedildi.'}\n"
                 f"💵 {abs(e['amount']):.2f} TL — {e['category']}\n"
                 f"📅 {e['expense_date']}\n"
                 f"📝 {_esc(e['description']) or '—'}"
@@ -535,7 +570,7 @@ async def _handle_expenses(action: str, params: Dict, owner_id: int) -> str:
         if action == "list":
             expenses = svc.list_expenses(conn, owner_id, params.get("month"))
             if not expenses:
-                return "💰 Harcama bulunamadı."
+                return "💰 Kayıtlı harcama yok."
             total = sum(e["amount"] for e in expenses)
             lines = ["💰 <b>Harcamalar:</b>\n"]
             for e in expenses[:10]:
@@ -555,7 +590,7 @@ async def _handle_expenses(action: str, params: Dict, owner_id: int) -> str:
         if action == "delete":
             e = svc.get_expense_by_id(conn, params.get("id"))
             if not e:
-                return "❌ Harcama bulunamadı."
+                return "❌ Böyle bir harcama bulamadım."
             return await _ask_delete_confirmation(
                 "expense", e["id"],
                 f"💵 {abs(e['amount']):.2f} TL — {e['category']} · {_esc(e['description']) or '—'} ({e['expense_date']})",
@@ -571,7 +606,7 @@ async def _handle_budget(action: str, params: Dict, owner_id: int) -> str:
     with get_db() as conn:
         if action == "set":
             b = svc.set_budget(conn, owner_id, params["category"], float(params["amount"]))
-            return f"✅ Bütçe limiti ayarlandı!\n🏷 {b['category']}: {b['monthly_limit']:.0f} TL/ay"
+            return f"✅ Bütçe limiti ayarlandı.\n🏷 {b['category']}: {b['monthly_limit']:.0f} TL/ay"
 
         if action == "list":
             budgets = svc.get_all_budgets(conn, owner_id)
@@ -587,7 +622,7 @@ async def _handle_budget(action: str, params: Dict, owner_id: int) -> str:
 
         if action == "delete":
             ok = svc.delete_budget(conn, owner_id, params.get("category", ""))
-            return "🗑 Bütçe limiti kaldırıldı." if ok else "❌ Kategori bulunamadı."
+            return "🗑 Bütçe limiti kaldırıldı." if ok else "❌ Böyle bir kategori bulamadım."
 
     return f"❓ Bilinmeyen aksiyon: {action}"
 
@@ -606,17 +641,18 @@ async def route_message(user_message: str, chat_id: str = "", owner_id: int = No
         k = kullanici_chat_id_ile(chat_id)
         if not k:
             log.warning("Sahibi çözülemeyen mesaj yok sayıldı (chat_id=%s)", chat_id)
-            return "⛔ Seni tanıyamadım."
+            return "⛔ Sizi tanıyamadım."
         owner_id = k["id"]
     else:
         k = kullanici_getir(owner_id)
 
     # Kayıt silinmiş olabilir; asistan isimsiz konuşsun, çökmesin.
     ad = (k or {}).get("ad") or "kullanıcı"
+    hitap = (k or {}).get("hitap")
 
     try:
         history = get_recent_messages(chat_id, HISTORY_LIMIT) if chat_id else []
-        parsed = await parse_message(user_message, history, ad)
+        parsed = await parse_message(user_message, history, ad, hitap)
         response = await dispatch(parsed, owner_id)
 
         if chat_id:
@@ -626,7 +662,7 @@ async def route_message(user_message: str, chat_id: str = "", owner_id: int = No
         return response
     except json.JSONDecodeError:
         log.warning("Groq geçerli JSON döndürmedi")
-        return "⚠️ Yanıtı işleyemedim. Mesajını biraz farklı ifade eder misin?"
+        return "⚠️ Yanıtı işleyemedim. Mesajınızı biraz farklı ifade eder misiniz?"
     except Exception:
         log.exception("Mesaj yönlendirilemedi")
-        return "⚠️ Bir hata oluştu. Kayıtlara not düştüm, tekrar dener misin?"
+        return "⚠️ Bir aksaklık oldu, kayda geçirdim. Tekrar dener misiniz?"

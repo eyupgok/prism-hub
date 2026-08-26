@@ -36,6 +36,12 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
+# Konuşma dökümü Türkçe ve emoji içeriyor; Windows konsolu (cp1254) bunları
+# yazamayıp UnicodeEncodeError atıyor. kullanici.py'de de aynısı var.
+for _akis in (sys.stdout, sys.stderr):
+    if hasattr(_akis, "reconfigure"):
+        _akis.reconfigure(encoding="utf-8", errors="replace")
+
 load_dotenv()
 
 from database import get_db

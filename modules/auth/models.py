@@ -39,7 +39,24 @@ def create_users_table(conn: sqlite3.Connection):
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_users_chat ON users(telegram_chat_id)")
     _migrate_konum(conn)
+    _migrate_hitap(conn)
     _seed_ilk_kullanici(conn)
+
+
+def _migrate_hitap(conn: sqlite3.Connection):
+    """Kişiye nasıl hitap edileceği — "Bey", "Hanım" (idempotent).
+
+    Asistan resmî bir üslupla konuşuyor ve doğru hitabı bilmesi gerekiyor.
+    Bu ADDAN ÇIKARILMIYOR: isme bakıp cinsiyet tahmin etmek yanlış sonuç
+    verebilen bir iş, yanlış hitap da gerçek bir kişiyi rahatsız eder.
+    Elle ayarlanıyor: `python kullanici.py hitap "<ad>" "Bey"`.
+
+    NULL kalırsa asistan cinsiyetten bağımsız "efendim" ile idare eder —
+    yani hiç doldurulmasa da üslup bozulmaz.
+    """
+    mevcut = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if "hitap" not in mevcut:
+        conn.execute("ALTER TABLE users ADD COLUMN hitap TEXT")
 
 
 def _migrate_konum(conn: sqlite3.Connection):

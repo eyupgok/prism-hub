@@ -202,7 +202,9 @@ async def _handle_message(message: Dict[str, Any]):
     if not kullanici:
         # chat_id'yi loga basıyoruz: yeni birini eklerken numarasını buradan alıyorsun.
         log.warning("Yetkisiz chat: %s", chat_id)
-        await send_message("⛔ Yetkisiz erişim.", chat_id=chat_id)
+        await send_message(
+            "⛔ Üzgünüm, sizi tanıyamadım. Bu sohbet yetkili değil.", chat_id=chat_id
+        )
         return
 
     owner_id = kullanici["id"]
@@ -218,8 +220,8 @@ async def _handle_message(message: Dict[str, Any]):
     # ── Hızlı komutlar (AI parse gerektirmez) ────────────────────────────────
     if text.startswith("/start"):
         await send_message(
-            "👋 Merhaba! Ben <b>PRISM</b>, kişisel AI asistanınızım.\n\n"
-            "Doğal dille konuşabilirsiniz. Örnekler:\n"
+            "<b>PRISM</b> hizmetinizde.\n\n"
+            "Benimle olağan Türkçenizle konuşabilirsiniz. Örnekler:\n"
             "• <i>Yarın saat 10'da toplantı hatırlatıcısı ekle</i>\n"
             "• <i>Her pazartesi standup hatırlat</i>\n"
             "• <i>Bugün 150 TL yemek harcadım</i>\n"
@@ -418,7 +420,7 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
                 r = svc.complete_reminder(conn, owner_id, reminder_id)
 
             if r:
-                await answer_callback_query(cb_id, "✅ Tamamlandı!")
+                await answer_callback_query(cb_id, "✅ Tamamlandı")
                 if r.get("rescheduled"):
                     due = svc.parse_dt(r["due_datetime"])
                     await edit_message(
@@ -471,7 +473,7 @@ async def _handle_callback_query(callback_query: Dict[str, Any]):
                 await answer_callback_query(cb_id, "⌛ Onay süresi doldu")
                 await edit_message(
                     chat_id, message_id,
-                    "⌛ <i>Onay süresi doldu, silme yapılmadı. Tekrar dener misin?</i>",
+                    "⌛ <i>Onay süresi doldu, silme yapılmadı. Tekrar dener misiniz?</i>",
                 )
             else:
                 deleters = {

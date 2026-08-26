@@ -41,7 +41,7 @@ async def get_morning_summary(owner_id: int) -> str:
     today_str = now.strftime("%Y-%m-%d")
     month_str = now.strftime("%Y-%m")
 
-    lines = ["☀️ Günaydın! Bugünün özeti:\n"]
+    lines = ["☀️ Günaydınlar. Bugünün özeti:\n"]
 
     # --- Hava durumu ---
     try:
@@ -97,7 +97,7 @@ async def get_morning_summary(owner_id: int) -> str:
 
 
 async def get_evening_summary(owner_id: int) -> str:
-    """Akşam 21:00 özeti: bugün ne yaptın, yarın seni ne bekliyor."""
+    """Akşam 21:00 özeti: bugün ne yapıldı, yarın ne bekliyor."""
     from database import get_db
     from modules.expenses import service as expenses_svc
     from modules.reminders import service as reminder_svc
@@ -121,7 +121,7 @@ async def get_evening_summary(owner_id: int) -> str:
     lines = [f"🌙 <b>Günün özeti</b> — {now.strftime('%d.%m.%Y')}\n"]
 
     if completed:
-        lines.append(f"✅ Bugün {completed} görev tamamladın.")
+        lines.append(f"✅ Bugün {completed} görev tamamladınız.")
     else:
         lines.append("✅ Bugün tamamlanan görev yok.")
 
@@ -133,7 +133,7 @@ async def get_evening_summary(owner_id: int) -> str:
             lines.append(f"  {emoji} {html.escape(r['title'])} ({due.strftime('%H:%M')})")
 
     if todays_expenses:
-        lines.append(f"\n💰 Bugün {_money(spent)} TL harcadın ({len(todays_expenses)} kayıt)")
+        lines.append(f"\n💰 Bugün {_money(spent)} TL harcadınız ({len(todays_expenses)} kayıt)")
         refunds = [e for e in todays_expenses if e["amount"] < 0]
         if refunds:
             lines.append(f"  ↩️ {len(refunds)} iade dahil")
@@ -147,7 +147,7 @@ async def get_evening_summary(owner_id: int) -> str:
             emoji = reminder_svc.PRIORITY_EMOJIS.get(r["priority"], "🟢")
             lines.append(f"  {emoji} {html.escape(r['title'])} ({due.strftime('%H:%M')})")
     else:
-        lines.append("\n📅 Yarın planlanmış görev yok. İyi geceler!")
+        lines.append("\n📅 Yarın için planlanmış görev yok. İyi geceler, efendim.")
 
     return "\n".join(lines)
 

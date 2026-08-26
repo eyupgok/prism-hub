@@ -25,6 +25,12 @@ from datetime import datetime
 import pytz
 from dotenv import load_dotenv
 
+# Sunucu UTF-8 ama Windows konsolu cp1254: çıktıdaki "→" ve Türkçe karakterler
+# UnicodeEncodeError ile çöküyordu. İş bitmiş, yalnız haber verirken patlıyordu.
+for _akis in (sys.stdout, sys.stderr):
+    if hasattr(_akis, "reconfigure"):
+        _akis.reconfigure(encoding="utf-8", errors="replace")
+
 load_dotenv()
 
 from auth import hash_password
@@ -48,13 +54,15 @@ def _parola_sor(ad: str) -> str:
 
 def listele():
     with get_db() as conn:
-        rows = conn.execute("SELECT id, ad, telegram_chat_id FROM users ORDER BY id").fetchall()
+        rows = conn.execute(
+            "SELECT id, ad, hitap, telegram_chat_id FROM users ORDER BY id"
+        ).fetchall()
     if not rows:
         print("Kayıtlı kullanıcı yok.")
         return
-    print(f"{'id':<4} {'ad':<20} telegram_chat_id")
+    print(f"{'id':<4} {'ad':<20} {'hitap':<8} telegram_chat_id")
     for r in rows:
-        print(f"{r['id']:<4} {r['ad']:<20} {r['telegram_chat_id'] or '—'}")
+        print(f"{r['id']:<4} {r['ad']:<20} {(r['hitap'] or '—'):<8} {r['telegram_chat_id'] or '—'}")
 
 
 def ekle(ad: str, chat_id: str | None):
@@ -107,6 +115,24 @@ def ad_degistir(eski: str, yeni: str):
     print("Panelde sayfayı yenileyince, Telegram'da bir sonraki mesajda görünür.")
 
 
+def hitap_ata(ad: str, hitap: str):
+    """Asistanın kişiye nasıl hitap edeceğini ayarlar ("Bey", "Hanım").
+
+    Addan çıkarılmıyor — isme bakıp cinsiyet tahmin etmek yanlış sonuç verebilir.
+    Boş bırakılırsa asistan cinsiyetten bağımsız "efendim" ile idare eder.
+    """
+    hitap = hitap.strip()
+    with get_db() as conn:
+        if not _kullanici_bul(conn, ad):
+            sys.exit(f"'{ad}' bulunamadı.")
+        conn.execute("UPDATE users SET hitap = ? WHERE ad = ?", (hitap or None, ad))
+
+    if hitap:
+        print(f"'{ad}' → asistan artık \"{ad} {hitap}\" diye hitap edecek.")
+    else:
+        print(f"'{ad}' → hitap temizlendi, asistan \"efendim\" diyecek.")
+
+
 def chat_id_ata(ad: str, chat_id: str):
     with get_db() as conn:
         if not _kullanici_bul(conn, ad):
@@ -141,6 +167,11 @@ def main():
     p_ad.add_argument("eski")
     p_ad.add_argument("yeni")
 
+    p_hitap = alt.add_parser("hitap", help='asistanın hitabı: "Bey" / "Hanım"')
+    p_hitap.add_argument("ad")
+    p_hitap.add_argument("hitap", nargs="?", default="",
+                         help="boş bırakılırsa temizlenir (asistan 'efendim' der)")
+
     a = ap.parse_args()
     init_db()   # tablolar yoksa kurulsun, göç eksikse tamamlansın
 
@@ -154,6 +185,8 @@ def main():
         chat_id_ata(a.ad, a.chat_id)
     elif a.komut == "ad":
         ad_degistir(a.eski, a.yeni)
+    elif a.komut == "hitap":
+        hitap_ata(a.ad, a.hitap)
 
 
 if __name__ == "__main__":

@@ -202,8 +202,11 @@ mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
 ## Veritabanı Tabloları
 
 ```sql
-users        (id, ad, telegram_chat_id UNIQUE, parola_hash, created_at,
+users        (id, ad, hitap, telegram_chat_id UNIQUE, parola_hash, created_at,
               sehir, enlem, boylam, konum_at)
+              → hitap = "Bey" / "Hanım", NULL olabilir. Asistanın seslenme
+                biçimi; addan ÇIKARILMAZ (bkz. "Asistanın Üslubu").
+                Göç: _migrate_hitap(), idempotent ALTER TABLE
               → parola_hash = `scrypt$<tuz>$<karma>` (auth.py). Düz metin YOK.
               → telegram_chat_id boşsa o kişi Telegram'dan yazamaz; bildirimleri de
                 gidecek yer bulamayıp TELEGRAM_CHAT_ID'e (Eyüp) düşer
@@ -286,6 +289,42 @@ yazar. Şehir adı yalnız kişi gerçekten yer değiştirmişse (>15 km) Nomina
 Konum hiç verilmemişse env'deki `WEATHER_*` (Elazığ) kullanılır.
 
 **Yeni kullanıcı eklemek** → `kullanici.py` (Deploy bölümünde adımları var).
+
+## Asistanın Üslubu
+
+**JARVIS kaydında konuşuyor** (Iron Man): kusursuz nezaket, sakin yetkinlik,
+arada kuru bir espri. Kural `ai_router.SYSTEM_PROMPT` → "KİMLİĞİN VE ÜSLUBUN".
+
+- **Daima SİZ.** "dener misin" değil "dener misiniz". İstisnasız.
+- Kısa ve kesin: "Kaydedildi." · "Üç göreviniz var." Abartılı heyecan ve ünlem yok.
+- Espri kuru ve kısa, asla kaba değil.
+
+⚠️ **Üslup iki yerden birden geliyor** — biri değişip diğeri kalırsa ton ortadan
+ikiye bölünür:
+
+| Kaynak | Nerede |
+|---|---|
+| Modelin ürettiği sohbet | `SYSTEM_PROMPT` (yalnız `chat.respond` metinleri) |
+| **Sabit onay/özet metinleri** | `ai_router.dispatch()`, `telegram_bot.py`, `modules/summary/service.py` |
+
+İkincisi kullanıcının gördüğünün çoğu ve modelden GEÇMİYOR. Yeni bir yanıt
+metni eklerken "sen" kipine kaymamak gerekiyor; `tests/test_uslup.py` bilinen
+samimi kalıpları kelime sınırıyla arayıp yakalıyor.
+
+**Hitap kişiye göre:** `users.hitap` ("Bey" / "Hanım") → yönergeye
+`ai_router.hitap_ifadesi()` ile giriyor, "Eyüp Bey" gibi.
+
+⚠️ **Hitap ADDAN ÇIKARILMIYOR.** İsme bakıp cinsiyet tahmin etmek yanlış sonuç
+verebilen bir iş ve yanlış hitap gerçek bir kişiyi rahatsız eder. Elle ayarlanıyor:
+
+```bash
+python kullanici.py hitap "Eyüp" "Bey"
+python kullanici.py hitap "Zeynep" "Hanım"
+python kullanici.py hitap "Eyüp"            # temizler
+```
+
+Boş bırakılırsa cinsiyetten bağımsız **"efendim"** kullanılır — yani hiç
+doldurulmasa da üslup bozulmaz, sadece adla seslenmez.
 
 ## AI Routing Sistemi
 
@@ -661,6 +700,7 @@ python kullanici.py ekle "Ad Soyad"               # parolayı ekranda sormaz (ge
 python kullanici.py chat-id "Ad Soyad" 123456789  # Telegram'ı bağla
 python kullanici.py parola "Ad Soyad"             # parola unutulursa yenisi
 python kullanici.py ad "Eski Ad" "Yeni Ad"        # görünen adı değiştir
+python kullanici.py hitap "Ad Soyad" "Bey"        # asistan "Ad Soyad Bey" desin
 ```
 
 Ad değiştirmek zararsız: sahiplik `owner_id` (numara) üzerinden, oturum bileti de
