@@ -63,3 +63,29 @@ def test_onay_metni_resmi():
     import inspect
 
     assert "Onaylıyor musunuz?" in inspect.getsource(ai_router)
+
+
+# ── Kendiliğinden gelen mesajlar ─────────────────────────────────────────────
+# Üslup artık ÜÇ yerden geliyor (bkz. CLAUDE.md "Asistanın Üslubu"): yönerge,
+# sabit metinler ve gözlem katmanının kendi yönergesi. Biri değişip diğeri
+# kalırsa ton ortadan bölünür.
+
+def test_gozlem_yonergesi_siz_kipini_koruyor():
+    from modules.gozlem.service import YONERGE
+
+    yonerge = YONERGE.format(ad="Eyüp", hitap="Eyüp Bey",
+                             now="29.08.2026 09:15 (Cumartesi)",
+                             hafiza="", sinyaller="- [DURUM] [x] y")
+
+    assert "Eyüp Bey" in yonerge
+    assert "**Daima SİZ**" in yonerge
+
+
+def test_gozlem_yonergesi_memur_uslubunu_yasakliyor():
+    """İlk gerçek turda model "arızası tespit edildi ... lütfen kontrol
+    ediniz" yazdı — bilgi doğruydu ama bir bakanlık yazısı gibiydi. Soyut
+    üslup tarifi yetmiyor, somut karşı örnek gerekiyor."""
+    from modules.gozlem.service import YONERGE
+
+    for kural in ("tespit edildi", "Lütfen", "İç adları kullanma"):
+        assert kural in YONERGE, kural
