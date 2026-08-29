@@ -18,7 +18,7 @@ def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""))
 
 SYSTEM_PROMPT = """\
-Sen PRISM'sin — {ad} kişisinin kişisel asistanı. Ona nasıl hitap edeceğin: {hitap}.
+Sen PRISM'sin — {ad} kişisinin kişisel asistanı. Ona "efendim" diye seslenirsin.
 Görevin onun günlük hayatını yönetmek: hatırlatıcılar, notlar, harcamalar, bütçe, hava durumu ve günlük özet.
 
 Kullanıcı Türkçe konuşur. Mesajları analiz et ve SADECE JSON formatında yanıt ver, başka hiçbir şey yazma.
@@ -29,8 +29,12 @@ Iron Man'deki JARVIS gibisin: kusursuz nezaket, sakin bir yetkinlik, arada kuru 
 - Adın PRISM. Şu an {ad} ile konuşuyorsun, başka bir isim uydurma.
 - **Daima SİZ diye hitap et.** "yaptın", "ister misin", "bak" DEĞİL;
   "yaptınız", "ister misiniz", "bakınız". Bu kural istisnasız.
-- Hitap için yukarıda verilen ifadeyi kullan. Cümlenin her yerine serpiştirme —
-  selamlaşmada, onaydan sonra ve bir şey sorarken doğal düşer.
+- **Olağan seslenişin "efendim".** JARVIS'in "sir"i gibi: sık ve doğal.
+  Cümlenin her yerine serpiştirme — selamlaşmada, onaydan sonra ve bir şey
+  sorarken doğal düşer.
+- **Adıyla seslenmek istisnadır** ("{adiyla}"). Dikkatini çekmen ya da bir
+  şeyi vurgulaman gerektiğinde kullan, olağan akışta değil. Her mesajda adını
+  anmak yapmacık durur; JARVIS de "Mr. Stark" demez, "sir" der.
 - Kısa ve kesin konuş. Bir işi bildirirken rapor verir gibi ol:
   "Kaydedildi." · "Üç göreviniz var." · "Bütçenin %80'ini geçtiniz."
 - Abartılı heyecan yok. Ünlem işaretini nadir kullan. "Harika!", "Süper!",
@@ -164,11 +168,11 @@ Eğer mesaj hiçbir kategoriye girmiyorsa, PRISM olarak kısa ve resmî bir Tür
 Selamlaşma, teşekkür, "nasılsın" gibi sorulara da sohbet modunda yanıt ver, üslubunu koru.
 
 Örnekler (üslubun ölçüsü bunlar):
-- "selam" → "İyi günler, {hitap}. Emrinizdeyim."
+- "selam" → "İyi günler, efendim. Emrinizdeyim."
 - "nasılsın" → "Sistemlerim yerinde, teşekkür ederim. Sizin için ne yapabilirim?"
-- "teşekkürler" → "Rica ederim, {hitap}."
+- "teşekkürler" → "Rica ederim, efendim."
 - "sen kimsin" → "PRISM. {ad} kişisinin asistanıyım; işlerinizi ben takip ediyorum."
-- "bugün yorgunum" → "Anlıyorum, {hitap}. Bugünün yükünü hafifletmemi ister misiniz?
+- "bugün yorgunum" → "Anlıyorum, efendim. Bugünün yükünü hafifletmemi ister misiniz?
   Acil olmayan hatırlatıcılarınızı yarına alabilirim."
 
 ## BİRDEN FAZLA İŞ
@@ -209,15 +213,23 @@ def panel_adresi() -> str:
     return adres or "(ayarlanmamış)"
 
 
-def hitap_ifadesi(ad: str, hitap: Optional[str]) -> str:
-    """Asistanın kişiye seslenirken kullanacağı ifade.
+# Olağan sesleniş. Kişiden ve cinsiyetten bağımsız, JARVIS'in "sir"inin
+# karşılığı. Asistanın ağzından çıkan seslenişlerin neredeyse tamamı bu.
+OLAGAN_HITAP = "efendim"
 
-    `hitap` doluysa "Eyüp Bey" gibi; boşsa cinsiyetten bağımsız "efendim".
-    Addan cinsiyet çıkarılmıyor — yanlış hitap gerçek bir kişiyi rahatsız eder,
-    "efendim" ise hiç kimseyi. Doldurmak için: kullanici.py hitap "<ad>" "Bey"
+
+def adiyla_hitap(ad: str, hitap: Optional[str]) -> str:
+    """Adıyla sesleniş: "Eyüp Bey" / "Zeynep Hanım" / hitap yoksa yalnız ad.
+
+    ⚠️ Bu asistanın OLAĞAN seslenişi DEĞİL — o `OLAGAN_HITAP` ("efendim").
+    Buradaki biçim vurgu için; yönergelerde "istisnadır" diye işaretli.
+    Her mesajda adı anmak yapmacık duruyor, JARVIS de "Mr. Stark" demiyor.
+
+    Addan cinsiyet çıkarılmıyor: yanlış hitap gerçek bir kişiyi rahatsız eder.
+    Doldurmak için: kullanici.py hitap "<ad>" "Bey"
     """
     hitap = (hitap or "").strip()
-    return f"{ad} {hitap}" if hitap else "efendim"
+    return f"{ad} {hitap}" if hitap else ad
 
 
 def yonerge_metni(
@@ -237,7 +249,7 @@ def yonerge_metni(
         now=now.strftime("%Y-%m-%d %H:%M"),
         today=now.strftime("%Y-%m-%d"),
         ad=ad,
-        hitap=hitap_ifadesi(ad, hitap),
+        adiyla=adiyla_hitap(ad, hitap),
         panel_url=panel_adresi(),
         hafiza=hafiza_metni,
     )

@@ -11,16 +11,27 @@ from conftest import SAHIP
 
 # ── Hitap ────────────────────────────────────────────────────────────────────
 
-def test_hitap_verilmisse_ad_ile_birlesir():
-    assert ai_router.hitap_ifadesi("Eyüp", "Bey") == "Eyüp Bey"
-    assert ai_router.hitap_ifadesi("Zeynep", "Hanım") == "Zeynep Hanım"
+def test_olagan_seslenis_kisiden_bagimsiz_efendim():
+    """JARVIS "sir" der, "Mr. Stark" demez. Olağan sesleniş kişiye, cinsiyete
+    ve `users.hitap` sütununa bağlı değil."""
+    assert ai_router.OLAGAN_HITAP == "efendim"
+
+    for ad, hitap in (("Eyüp", "Bey"), ("Zeynep", "Hanım"), ("Eyüp", None)):
+        yonerge = ai_router.yonerge_metni(ad, hitap)
+        assert '"efendim" diye seslenirsin' in yonerge
+        assert "istisnadır" in yonerge
 
 
-def test_hitap_yoksa_cinsiyetsiz_ifadeye_duser():
+def test_adiyla_hitap_vurgu_icin_saklaniyor():
+    assert ai_router.adiyla_hitap("Eyüp", "Bey") == "Eyüp Bey"
+    assert ai_router.adiyla_hitap("Zeynep", "Hanım") == "Zeynep Hanım"
+
+
+def test_hitap_yoksa_yalniz_ad_kalir():
     """Addan cinsiyet çıkarmıyoruz: yanlış hitap gerçek bir kişiyi rahatsız
-    eder, 'efendim' ise hiç kimseyi."""
+    eder. Sesleniş zaten "efendim" olduğu için bu boşluk üslubu bozmuyor."""
     for bos in (None, "", "   "):
-        assert ai_router.hitap_ifadesi("Eyüp", bos) == "efendim"
+        assert ai_router.adiyla_hitap("Eyüp", bos) == "Eyüp"
 
 
 def test_hitap_yonergeye_giriyor():
@@ -73,7 +84,7 @@ def test_onay_metni_resmi():
 def test_gozlem_yonergesi_siz_kipini_koruyor():
     from modules.gozlem.service import YONERGE
 
-    yonerge = YONERGE.format(ad="Eyüp", hitap="Eyüp Bey",
+    yonerge = YONERGE.format(ad="Eyüp", adiyla="Eyüp Bey",
                              now="29.08.2026 09:15 (Cumartesi)",
                              hafiza="", sinyaller="- [DURUM] [x] y")
 

@@ -362,8 +362,15 @@ ikiye bölünür:
 metni eklerken "sen" kipine kaymamak gerekiyor; `tests/test_uslup.py` bilinen
 samimi kalıpları kelime sınırıyla arayıp yakalıyor.
 
-**Hitap kişiye göre:** `users.hitap` ("Bey" / "Hanım") → yönergeye
-`ai_router.hitap_ifadesi()` ile giriyor, "Eyüp Bey" gibi.
+**Olağan sesleniş "efendim"** — kişiden ve cinsiyetten bağımsız, JARVIS'in
+"sir"inin karşılığı (`ai_router.OLAGAN_HITAP`). Asistanın ağzından çıkan
+seslenişlerin neredeyse tamamı bu.
+
+**Adıyla seslenmek istisna:** `users.hitap` ("Bey" / "Hanım") →
+`ai_router.adiyla_hitap()` → "Eyüp Bey". Yönergeye `{adiyla}` yer tutucusuyla
+giriyor ve orada **"istisnadır, vurgu gerektiğinde"** diye işaretli. Her
+mesajda adı anmak yapmacık duruyor — JARVIS de "Mr. Stark" demiyor, "sir"
+diyor.
 
 ⚠️ **Hitap ADDAN ÇIKARILMIYOR.** İsme bakıp cinsiyet tahmin etmek yanlış sonuç
 verebilen bir iş ve yanlış hitap gerçek bir kişiyi rahatsız eder. Elle ayarlanıyor:
@@ -374,8 +381,9 @@ python kullanici.py hitap "Zeynep" "Hanım"
 python kullanici.py hitap "Eyüp"            # temizler
 ```
 
-Boş bırakılırsa cinsiyetten bağımsız **"efendim"** kullanılır — yani hiç
-doldurulmasa da üslup bozulmaz, sadece adla seslenmez.
+Boş bırakılırsa adıyla seslendiği o nadir anlarda yalnız adı söyler.
+Olağan sesleniş her hâlükârda "efendim" olduğu için hiç doldurulmasa da
+üslup bozulmaz.
 
 ## Gözlem Katmanı
 

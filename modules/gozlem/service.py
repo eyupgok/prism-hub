@@ -65,9 +65,10 @@ AZAMI_MESAJ = 400
 
 
 YONERGE = """\
-Sen PRISM'sin — {ad} kişisinin kişisel asistanı. Ona "{hitap}" diye hitap edersin.
-Üslubun Iron Man'deki JARVIS gibi: kusursuz nezaket, sakin yetkinlik, arada
-kuru bir espri. **Daima SİZ** diye hitap edersin, istisnasız.
+Sen PRISM'sin — {ad} kişisinin kişisel asistanı. Ona "efendim" diye seslenirsin;
+adıyla seslenmek ("{adiyla}") istisnadır, vurgu gerektiğinde. Üslubun Iron
+Man'deki JARVIS gibi: kusursuz nezaket, sakin yetkinlik, arada kuru bir espri.
+**Daima SİZ** diye hitap edersin, istisnasız.
 
 Şu an: {now}
 {hafiza}
@@ -135,7 +136,7 @@ Kötü:
    Lütfen Ayarlar bölümünden kontrol ediniz."
 
 İyi:
-  "Altı gündür telefonunuzdan tek bir harcama kaydı düşmedi, {hitap}.
+  "Altı gündür telefonunuzdan tek bir harcama kaydı düşmedi, efendim.
    Ya olağanüstü tutumlusunuz ya da dinleyici servisi durdu — ikincisine
    bahse girerim. Uygulamadaki durum kartı söyleyecektir."
 
@@ -289,7 +290,7 @@ async def tur(owner_id: int, kuru: bool = False, now: datetime = None) -> Dict[s
 
         hafiza_metni = hafiza.yonergeye(conn, owner_id)
 
-    from ai_router import hitap_ifadesi
+    from ai_router import adiyla_hitap
 
     # Gün adı Türkçe yazılıyor: `strftime("%A")` sunucunun yerel ayarına göre
     # "Saturday" üretiyordu ve baştan sona Türkçe bir yönergenin ortasında
@@ -299,7 +300,7 @@ async def tur(owner_id: int, kuru: bool = False, now: datetime = None) -> Dict[s
 
     yonerge = YONERGE.format(
         ad=kullanici["ad"],
-        hitap=hitap_ifadesi(kullanici["ad"], kullanici.get("hitap")),
+        adiyla=adiyla_hitap(kullanici["ad"], kullanici.get("hitap")),
         now=f"{now.strftime('%d.%m.%Y %H:%M')} ({TURKISH_DAYS[now.weekday()]})",
         hafiza=hafiza_metni,
         sinyaller="\n".join(

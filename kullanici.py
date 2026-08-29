@@ -119,7 +119,10 @@ def hitap_ata(ad: str, hitap: str):
     """Asistanın kişiye nasıl hitap edeceğini ayarlar ("Bey", "Hanım").
 
     Addan çıkarılmıyor — isme bakıp cinsiyet tahmin etmek yanlış sonuç verebilir.
-    Boş bırakılırsa asistan cinsiyetten bağımsız "efendim" ile idare eder.
+
+    ⚠️ Bu, asistanın OLAĞAN seslenişi değil: o her hâlükârda "efendim"
+    (JARVIS'in "sir"i). Buradaki hitap yalnız adıyla seslendiği nadir anlarda
+    kullanılıyor. Boş bırakılırsa o anlarda da yalnız adı söyler.
     """
     hitap = hitap.strip()
     with get_db() as conn:
@@ -127,10 +130,11 @@ def hitap_ata(ad: str, hitap: str):
             sys.exit(f"'{ad}' bulunamadı.")
         conn.execute("UPDATE users SET hitap = ? WHERE ad = ?", (hitap or None, ad))
 
+    olagan = "Olağan seslenişi her hâlükârda \"efendim\"."
     if hitap:
-        print(f"'{ad}' → asistan artık \"{ad} {hitap}\" diye hitap edecek.")
+        print(f"'{ad}' → adıyla seslenirken \"{ad} {hitap}\" diyecek. {olagan}")
     else:
-        print(f"'{ad}' → hitap temizlendi, asistan \"efendim\" diyecek.")
+        print(f"'{ad}' → hitap temizlendi, adıyla seslenirken yalnız \"{ad}\". {olagan}")
 
 
 def chat_id_ata(ad: str, chat_id: str):
