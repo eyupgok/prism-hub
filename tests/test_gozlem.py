@@ -350,6 +350,101 @@ def test_olagandisi_harcama_buyuk_sicramayi_yakalar(db):
     assert s and s["anahtar"].startswith("olagandisi_harcama:")
 
 
+# ── Hava ─────────────────────────────────────────────────────────────────────
+
+def _tahmin(gun, saatler):
+    """{14: (61, 20), 15: (0, 22)} → saatlik tahmin sözlüğü."""
+    return {
+        f"{gun.isoformat()}T{saat:02d}:00": {"kod": kod, "sicaklik": derece}
+        for saat, (kod, derece) in saatler.items()
+    }
+
+
+def test_hava_cakismasi_disarida_olup_olmadigini_bilmedigini_soyluyor(db):
+    """Kod 'Sabah Vitamini' ile 'koşuya çık' arasındaki farkı bilemez; kanıt bu
+    soruyu açıkça açık bırakmalı, yoksa model onu hazır uyarı sanıp aktarıyor
+    (gerçekten oldu)."""
+    now = _an(saat=12)
+    due = now + timedelta(hours=2)
+    rem.create_reminder(db, SAHIP, "Sabah Vitamini", due.isoformat())
+    tahmin = _tahmin(due.date(), {due.hour: (61, 18)})
+
+    bulunan = sinyaller.hava_cakismasi(db, SAHIP, tahmin, now)
+
+    assert len(bulunan) == 1
+    assert "BİLİNMİYOR" in bulunan[0]["kanit"]
+    assert "Sabah Vitamini" in bulunan[0]["kanit"]
+
+
+def test_hava_tahmini_yoksa_sinyal_yok(db):
+    """Hava servisi çökerse gözlem turu devam etmeli."""
+    now = _an(saat=12)
+    rem.create_reminder(db, SAHIP, "koşu", (now + timedelta(hours=2)).isoformat())
+
+    assert sinyaller.hava_cakismasi(db, SAHIP, {}, now) == []
+    assert sinyaller.hava_uyarisi({}, now) == []
+
+
+def test_hava_uyarisi_yagmuru_saatiyle_bildiriyor(db):
+    now = _an(saat=12)
+    tahmin = _tahmin(now.date(), {18: (61, 17), 19: (63, 16), 20: (61, 16)})
+
+    bulunan = sinyaller.hava_uyarisi(tahmin, now)
+
+    assert len(bulunan) == 1
+    assert bulunan[0]["anahtar"] == f"hava_uyarisi:{now.date().isoformat()}"
+    assert "18:00-21:00" in bulunan[0]["kanit"]
+    assert "bugün" in bulunan[0]["kanit"]
+
+
+def test_hava_uyarisi_cisentiyi_konu_etmiyor(db):
+    """Çisenti (51) dışarıdaki bir işin ortasında önemli olabilir ama
+    kendiliğinden mesaj konusu değil — Elazığ kışında her gün konuşmak olurdu."""
+    now = _an(saat=12)
+
+    assert sinyaller.hava_uyarisi(_tahmin(now.date(), {18: (51, 12)}), now) == []
+    assert sinyaller.hava_uyarisi(_tahmin(now.date(), {18: (61, 12)}), now)
+
+
+def test_hava_uyarisi_cok_yakin_saati_atlar(db):
+    """Yarım saat sonra başlayacak yağmuru zaten pencereden görüyor."""
+    now = _an(saat=12)
+    hemen = now.hour + sinyaller.HAVA_UYARI_ASGARI_SAAT - 1
+
+    assert sinyaller.hava_uyarisi(_tahmin(now.date(), {hemen: (65, 14)}), now) == []
+
+
+def test_yarinin_havasi_aksama_dogru_konusuluyor(db):
+    """Sabah özeti bugünü zaten veriyor; yarın ise akşama doğru planlanır."""
+    yarin = (_an().date() + timedelta(days=1))
+    tahmin = _tahmin(yarin, {14: (63, 15), 15: (63, 15)})
+
+    erken = _an(saat=sinyaller.HAVA_YARIN_SAATI - 2)
+    gec = _an(saat=sinyaller.HAVA_YARIN_SAATI + 2)
+
+    assert sinyaller.hava_uyarisi(tahmin, erken) == []
+    bulunan = sinyaller.hava_uyarisi(tahmin, gec)
+    assert len(bulunan) == 1
+    assert "yarın" in bulunan[0]["kanit"]
+
+
+def test_hava_uyarisi_sicagi_yagmurdan_once_soyluyor(db):
+    """Yağmura şemsiye yeter, 38 derece günü baştan planlatır."""
+    now = _an(saat=10)
+    tahmin = _tahmin(now.date(), {14: (61, sinyaller.SICAK_ESIK + 3)})
+
+    (bulunan,) = sinyaller.hava_uyarisi(tahmin, now)
+
+    assert f"{sinyaller.SICAK_ESIK + 3}°C" in bulunan["kanit"]
+    assert bulunan["agirlik"] == 2
+
+
+def test_dagink_saatler_tek_aralik_gibi_gosterilmiyor(db):
+    """08:00'de ve 20:00'de yağmur varsa '08:00 ile 21:00 arası' demek uydurmadır."""
+    assert sinyaller._araliklar([8, 20]) == "08:00-09:00 ve 20:00-21:00"
+    assert sinyaller._araliklar([14, 15, 16]) == "14:00-17:00"
+
+
 # ── Takip ────────────────────────────────────────────────────────────────────
 # Takip "yarın dişçiye gidiyorum" gibi hiçbir tabloya girmeyen bir cümleyi
 # ertesi akşam sorulacak bir soruya çeviriyor.

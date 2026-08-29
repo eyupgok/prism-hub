@@ -83,6 +83,18 @@ YAGIS_KODU = 51
 SICAK_ESIK = 35
 SOGUK_ESIK = 0
 
+# Göreve bağlı OLMAYAN hava uyarısının eşiği daha yüksek (61 = düzgün yağmur).
+# Çisenti, dışarıda yapılacak bir işin ortasındayken önemli; ama "yarın çiseliyor"
+# diye kendiliğinden mesaj atmak Elazığ kışında her gün konuşmak demek — asistanı
+# susturan tam olarak bu tür gürültü.
+HAVA_UYARI_YAGIS_KODU = 61
+# Bugünün havası için: bu kadar saat sonrasına bakılır. Yarım saat sonra
+# başlayacak yağmuru zaten pencereden görüyor.
+HAVA_UYARI_ASGARI_SAAT = 2
+# Yarının havası bu saatten önce konuşulmaz: sabah özeti (08:00) bugünü zaten
+# veriyor, yarın ise ancak akşama doğru planlanan bir şey.
+HAVA_YARIN_SAATI = 15
+
 
 def _para(deger: float) -> str:
     return f"{deger:,.0f}".replace(",", ".")
@@ -371,31 +383,45 @@ def tamamlama_orani(conn, owner_id: int, now: datetime) -> Optional[Dict]:
 
 # ── Dış dünya ────────────────────────────────────────────────────────────────
 
-async def hava_cakismasi(conn, owner_id: int, user: Dict, now: datetime) -> List[Dict]:
+async def hava_tahmini(user: Dict) -> Dict[str, Dict[str, Any]]:
+    """Saatlik tahmini turda BİR KEZ çeker; alınamazsa boş sözlük döner.
+
+    İki hava üreticisi de bunu kullanıyor. Ayrı ayrı çekselerdi tur başına iki
+    HTTP isteği olur ve iki üretici birbiriyle çelişebilirdi. Boş dönmek
+    sessizce doğru davranış: gözlem turunun tamamı dış bir API'ye bağlı
+    kalmamalı.
+    """
+    from modules.weather import service as hava
+    try:
+        return await hava.saatlik_tahmin(user)
+    except Exception as e:
+        log.warning("Saatlik tahmin alınamadı (%s) — hava sinyalleri atlandı", type(e).__name__)
+        return {}
+
+
+def hava_cakismasi(conn, owner_id: int, tahmin: Dict, now: datetime) -> List[Dict]:
     """Önümüzdeki 24 saatteki görevlerden birinin saatinde kötü hava var mı?
 
-    Dışarıya çıkılacak mı bilmiyoruz — hatırlatıcının metninde yazmıyor. Bu
-    yüzden kanıt "o saatte yağmur bekleniyor" demekle yetiniyor, "şemsiye alın"
-    demiyor; yorumu modele bırakıyoruz, o da görev başlığına bakıp karar veriyor.
+    ⚠️ **Dışarıya çıkılıp çıkılmayacağını kod bilemez** — hatırlatıcının
+    metninde yazmıyor ve "Sabah Vitamini" ile "koşuya çık" arasındaki farkı
+    anlamak bir yargı işi, aritmetik değil. Bu yüzden kanıt o soruyu açıkça
+    açık bırakıyor ve kararı modele devrediyor.
 
-    Hava servisi cevap vermezse sessizce boş dönüyor: gözlem turunun tamamı
-    dış bir API'ye bağlı kalmamalı.
+    Devretmek yetmiyor, kuralı yazmak da gerekiyordu: ilk sürümde yönergede
+    bu kural yoktu ve model "'Sabah Vitamini' göreviniz hafif sağanak
+    bekliyor, planınızı gözden geçirin" dedi. Kanıt doğruydu, seçim saçmaydı.
+    Kural artık `service.YONERGE` → KURALLAR/8'de.
     """
     from modules.reminders import service as rem
     from modules.weather import service as hava
+
+    if not tahmin:
+        return []
 
     yakin = [
         r for r in rem.list_reminders(conn, owner_id, include_completed=False)
         if now <= rem.parse_dt(r["due_datetime"]) <= now + timedelta(hours=24)
     ]
-    if not yakin:
-        return []
-
-    try:
-        tahmin = await hava.saatlik_tahmin(user)
-    except Exception as e:
-        log.warning("Saatlik tahmin alınamadı (%s) — hava sinyali atlandı", type(e).__name__)
-        return []
 
     bulunan = []
     for r in yakin:
@@ -416,10 +442,98 @@ async def hava_cakismasi(conn, owner_id: int, user: Dict, now: datetime) -> List
 
         bulunan.append(_sinyal(
             f"hava_cakismasi:{r['id']}",
-            f"'{r['title']}' görevi {due.strftime('%d.%m %H:%M')} saatinde ve "
-            f"o saatte {durum} bekleniyor",
+            f"'{r['title']}' görevi {due.strftime('%d.%m %H:%M')} saatinde; "
+            f"o saatte {durum} bekleniyor. Görevin dışarıda yapılıp "
+            f"yapılmayacağı BİLİNMİYOR",
             agirlik=2,
         ))
+    return bulunan
+
+
+def _araliklar(saatler: List[int]) -> str:
+    """[14,15,16,20] → "14:00-17:00 ve 20:00-21:00" (bitişikleri birleştirir).
+
+    Dağınık saatleri tek aralık gibi göstermek yanlış olurdu: 08:00'de ve
+    20:00'de yağmur varsa "08:00 ile 21:00 arası" demek uydurma sayılır.
+    """
+    araliklar: List[List[int]] = []
+    for saat in sorted(set(saatler)):
+        if araliklar and saat == araliklar[-1][1] + 1:
+            araliklar[-1][1] = saat
+        else:
+            araliklar.append([saat, saat])
+    return " ve ".join(f"{a:02d}:00-{b + 1:02d}:00" for a, b in araliklar[:2])
+
+
+def hava_uyarisi(tahmin: Dict, now: datetime) -> List[Dict]:
+    """Görevden bağımsız, kendi başına söylenmeye değer hava.
+
+    `hava_cakismasi`tan farkı: orada hava bir görevin bağlamı ("14:00'teki
+    işiniz sırasında yağmur var"), burada haberin kendisi ("yarın öğleden
+    sonra yağmur bekleniyor"). İkisi ayrı, çünkü biri hatırlatıcı olmadan
+    çalışmıyor, diğeri hatırlatıcıya hiç bakmıyor.
+
+    Eşiği bilerek daha yüksek (`HAVA_UYARI_YAGIS_KODU`): çisenti dışarıda
+    yapılacak bir işin ortasında önemli olabilir ama kendiliğinden mesaj
+    konusu değil.
+
+    Anahtar güne bağlı (`hava_uyarisi:2026-08-30`) — yani bir gün hakkında
+    en fazla bir kez konuşulur, ama yarın hakkında konuşmuş olmak öbür gün
+    hakkında susmayı gerektirmez.
+    """
+    from modules.weather import service as hava
+
+    if not tahmin:
+        return []
+
+    bulunan = []
+    for gun_farki in (0, 1):
+        # Yarın, sabah özetinin kapsamadığı tek gün; ama ancak akşama doğru
+        # planlanan bir şey. Sabahın 9'unda "yarın yağmur var" demek erken.
+        if gun_farki and now.hour < HAVA_YARIN_SAATI:
+            continue
+
+        gun = (now + timedelta(days=gun_farki)).date()
+        ilk = now.hour + HAVA_UYARI_ASGARI_SAAT if gun_farki == 0 else 6
+
+        yagis, sicak, soguk = [], [], []
+        for saat in range(ilk, 24):
+            veri = tahmin.get(f"{gun.isoformat()}T{saat:02d}:00")
+            if not veri:
+                continue
+            if veri["kod"] >= HAVA_UYARI_YAGIS_KODU:
+                yagis.append((saat, veri["kod"]))
+            if veri["sicaklik"] >= SICAK_ESIK:
+                sicak.append((saat, veri["sicaklik"]))
+            elif veri["sicaklik"] <= SOGUK_ESIK:
+                soguk.append((saat, veri["sicaklik"]))
+
+        ne_zaman = "bugün" if gun_farki == 0 else f"yarın ({gun.strftime('%d.%m')})"
+
+        # Günde tek olay: mesaj en fazla üç cümle olacak, hepsini sıralamak
+        # onu hava raporuna çevirir. Sıcaklık uç değeri yağıştan önce gelir —
+        # yağmura şemsiye yeter, 38 derece günü baştan planlatır.
+        if sicak:
+            uc = max(d for _, d in sicak)
+            kanit = (f"{ne_zaman} {_araliklar([s for s, _ in sicak])} arasında "
+                     f"sıcaklık {uc}°C'ye çıkıyor")
+            agirlik = 2
+        elif soguk:
+            uc = min(d for _, d in soguk)
+            kanit = (f"{ne_zaman} {_araliklar([s for s, _ in soguk])} arasında "
+                     f"sıcaklık {uc}°C'ye düşüyor")
+            agirlik = 2
+        elif yagis:
+            kod = max(k for _, k in yagis)
+            durum = hava.WMO_DESCRIPTIONS.get(kod, "yağış").lower()
+            kanit = (f"{ne_zaman} {_araliklar([s for s, _ in yagis])} arasında "
+                     f"{durum} bekleniyor")
+            agirlik = 1
+        else:
+            continue
+
+        bulunan.append(_sinyal(f"hava_uyarisi:{gun.isoformat()}", kanit, agirlik=agirlik))
+
     return bulunan
 
 
@@ -510,9 +624,14 @@ async def topla(conn, owner_id: int, user: Dict, now: datetime = None) -> List[D
         except Exception:
             log.exception("Sinyal üretilemedi: %s", uretici.__name__)
 
-    try:
-        sinyaller.extend(await hava_cakismasi(conn, owner_id, user, now) or [])
-    except Exception:
-        log.exception("Sinyal üretilemedi: hava_cakismasi")
+    tahmin = await hava_tahmini(user)
+    for uretici, cagir in (
+        (hava_cakismasi, lambda: hava_cakismasi(conn, owner_id, tahmin, now)),
+        (hava_uyarisi, lambda: hava_uyarisi(tahmin, now)),
+    ):
+        try:
+            sinyaller.extend(cagir() or [])
+        except Exception:
+            log.exception("Sinyal üretilemedi: %s", uretici.__name__)
 
     return sorted(sinyaller, key=lambda s: -s["agirlik"])

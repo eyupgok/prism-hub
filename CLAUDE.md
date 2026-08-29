@@ -408,6 +408,7 @@ isim uyduramaz.
 | `gecikmis_gorevler` | Vadesi geçmiş, tamamlanmamış yığın | 2 |
 | `inatci_gorev:<id>` | Çok ertelenmiş / uzun süredir duran tek görev (en fazla 2) | 2 |
 | `hava_cakismasi:<id>` | Yaklaşan görevin saatinde yağış / aşırı sıcak-soğuk | 2 |
+| `hava_uyarisi:<gün>` | Görevden bağımsız kayda değer hava (bugün / yarın) | 1–2 |
 | `tamamlama_orani` | Kurma hızı bitirme hızını çok aşıyor | 1 |
 | `ev_halki:<id>` | Diğer kişinin yaklaşan Kritik/Önemli görevi | 1 |
 
@@ -440,6 +441,36 @@ seçilemiyor. Bu yüzden anahtar sabit olmalı — `gecikmis_gorevler` bilerek s
 içermiyor; içerseydi sayı her değiştiğinde "yeni konu" sanılıp aynı şey her gün
 söylenirdi. Kategoriye/kayda özel olanlar ise bilerek ayrı: yemek bütçesi
 hakkında konuşmuş olmak ulaşım bütçesi hakkında susmayı gerektirmez.
+
+### İki hava sinyali ayrı
+
+| | `hava_cakismasi` | `hava_uyarisi` |
+|---|---|---|
+| Hava neyin nesi | bir **görevin bağlamı** | **haberin kendisi** |
+| Hatırlatıcı yoksa | hiç çalışmaz | yine çalışır |
+| Yağış eşiği | `YAGIS_KODU` (51, çisenti) | `HAVA_UYARI_YAGIS_KODU` (61, düzgün yağmur) |
+| Anahtar | `hava_cakismasi:<görev id>` | `hava_uyarisi:<YYYY-MM-DD>` |
+
+Eşikler bilerek farklı: çisenti dışarıda yapılacak bir işin ortasında önemli
+olabilir, ama "yarın çiseliyor" diye kendiliğinden mesaj atmak Elazığ kışında
+her gün konuşmak demektir. Yarının havası `HAVA_YARIN_SAATI`'nden (15:00)
+önce konu edilmiyor — sabah özeti bugünü zaten veriyor, yarın ise akşama
+doğru planlanan bir şey. Saatlik tahmin turda **bir kez** çekilip
+(`hava_tahmini()`) iki üreticiye de veriliyor.
+
+⚠️ **Kod, görevin dışarıda olup olmadığını bilemez.** Hatırlatıcının metninde
+yazmıyor ve "Sabah Vitamini" ile "koşuya çık" arasındaki farkı anlamak bir
+yargı işi — aritmetik değil. Bu yüzden `hava_cakismasi` kanıtı soruyu açıkça
+**açık bırakıyor** ("dışarıda yapılıp yapılmayacağı BİLİNMİYOR") ve kararı
+modele devrediyor.
+
+⚠️ Devretmek yetmedi, kuralı yönergeye yazmak da gerekti. İlk sürümde kanıt
+zaten belirsizdi ama `YONERGE`'de karşılığı yoktu; model eline "şu görev şu
+saatte, o saatte yağmur var" diye bir kanıt geçince bunu hazır bir uyarı sanıp
+aktardı: *"'Sabah Vitamini' göreviniz hafif sağanak bekliyor, planınızı gözden
+geçirmenizi öneririm."* Kanıt doğruydu, **seçim** saçmaydı. Kural artık
+KURALLAR/8'de. Ders: bir yargıyı modele bırakmak, o yargının ölçütünü
+yönergeye yazmadıkça bırakmak sayılmıyor.
 
 ### Susma bütçesi (`modules/gozlem/service.py`)
 
