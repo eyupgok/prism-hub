@@ -11,6 +11,7 @@ web panelindeki sohbet sayfası (`panel:<kullanıcı id>`).
 """
 
 import json
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 
@@ -23,6 +24,14 @@ def kanallar(conn, owner_id: int) -> List[str]:
     return liste
 
 
+def _damga(ham: str) -> str:
+    """`created_at` → "[gg.aa ss:dd]". Okunamazsa boş döner, satır yine yazılır."""
+    try:
+        return datetime.fromisoformat(ham).strftime("[%d.%m %H:%M] ")
+    except (ValueError, TypeError):
+        return ""
+
+
 def dokum(satirlar: List[Dict], ad: str) -> str:
     """Konuşma satırlarını modele verilecek düz metne çevirir.
 
@@ -30,11 +39,20 @@ def dokum(satirlar: List[Dict], ad: str) -> str:
     içlerinde çıkarılacak bir şey yok, sadece gürültü. Sohbet yanıtları metin
     olarak alınıyor, çünkü soruyu görmeden cevabı anlamak mümkün değil:
     "Nerelisiniz?" olmadan "Elazığ" hiçbir şey ifade etmiyor.
+
+    ⚠️ **Her satırın başında zaman damgası var ve şart.** Damgasız dökümde
+    "yarın dişçiye gidiyorum" cümlesinin ne zaman söylendiği belli olmuyor;
+    model onu okuduğu ana göre çözüyor ve üç hafta önce olmuş bitmiş bir olay
+    için yarına soru kuruyor (gerçekten oldu). Damga olmadan yönergedeki
+    "geçmişte kalmış olayları yazma" kuralı da uygulanamaz — model neyin
+    geçmişte kaldığını göremez. Bu, katmanın temel kuralının gereği: olguyu
+    kod verir, model yalnız ifadeyi kurar.
     """
     cikti = []
     for r in satirlar:
+        an = _damga(r.get("created_at"))
         if r["role"] == "user":
-            cikti.append(f"{ad}: {r['content']}")
+            cikti.append(f"{an}{ad}: {r['content']}")
             continue
         try:
             veri = json.loads(r["content"])
@@ -43,7 +61,7 @@ def dokum(satirlar: List[Dict], ad: str) -> str:
         if isinstance(veri, dict) and veri.get("module") == "chat":
             mesaj = (veri.get("params") or {}).get("message", "")
             if mesaj:
-                cikti.append(f"PRISM: {mesaj}")
+                cikti.append(f"{an}PRISM: {mesaj}")
     return "\n".join(cikti)
 
 
@@ -59,7 +77,7 @@ def yeni_dokum(
     """
     kanal = kanallar(conn, owner_id)
     satirlar = [dict(r) for r in conn.execute(
-        f"SELECT id, role, content FROM conversations "
+        f"SELECT id, role, content, created_at FROM conversations "
         f"WHERE id > ? AND chat_id IN ({','.join('?' * len(kanal))}) "
         f"ORDER BY id ASC LIMIT ?",
         (son_id, *kanal, sinir),

@@ -18,7 +18,7 @@ import pytz
 
 import ai_router
 from conftest import OTEKI, SAHIP
-from modules.gozlem import hafiza, service, sinyaller, takip
+from modules.gozlem import hafiza, konusma, service, sinyaller, takip
 from modules.gozlem.models import AZAMI_ACIK_TAKIP, AZAMI_BILGI, TAKIP_BAYATLAMA_GUNU
 from modules.reminders import service as rem
 
@@ -45,6 +45,66 @@ def _gunluk_kayit(db, owner, karar, anahtar=None, ne_zaman=None):
         "VALUES (?, ?, ?, '', '', '[]', ?)",
         (owner, karar, anahtar, (ne_zaman or _an()).isoformat()),
     )
+
+
+def _konusma(db, chat_id, role, content, ne_zaman=None):
+    db.execute(
+        "INSERT INTO conversations (chat_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+        (chat_id, role, content, (ne_zaman or _an()).isoformat()),
+    )
+
+
+# ── Konuşma dökümü ───────────────────────────────────────────────────────────
+
+def test_dokum_satirlari_zaman_damgasi_tasiyor(db):
+    """Damgasız döküm gerçek bir hataya yol açtı: model üç hafta önce söylenmiş
+    'yarın randevum var' cümlesini okuduğu ana göre çözüp yarına soru kurdu.
+    Olguyu kod verir — modelden cümlenin ne zaman söylendiğini tahmin etmesi
+    istenemez."""
+    _konusma(db, "111", "user", "Yarın saat 4 randevum var", _an(saat=21, gun_farki=-21))
+
+    metin, _ = konusma.yeni_dokum(db, SAHIP, 0, 60)
+
+    assert "[25.08 21:00]" in metin
+    assert "Yarın saat 4 randevum var" in metin
+
+
+def test_dokum_komut_jsonunu_atlar_sohbeti_alir(db):
+    _konusma(db, "111", "user", "Nerelisiniz?")
+    _konusma(db, "111", "assistant", json.dumps(
+        {"module": "chat", "params": {"message": "Elazığ'dayım."}}))
+    _konusma(db, "111", "user", "Yarına hatırlatıcı kur")
+    _konusma(db, "111", "assistant", json.dumps(
+        {"module": "reminders", "action": "create", "params": {"title": "x"}}))
+
+    metin, _ = konusma.yeni_dokum(db, SAHIP, 0, 60)
+
+    assert "Elazığ'dayım." in metin        # sohbet: soruyu görmeden cevap anlaşılmaz
+    assert "reminders" not in metin        # komut JSON'u: gürültü
+
+
+def test_dokum_kisinin_iki_kanalini_birlestirir(db):
+    """Telegram ve panel ayrı chat_id ama aynı kişi."""
+    _konusma(db, "111", "user", "telegramdan")
+    _konusma(db, f"panel:{SAHIP}", "user", "panelden")
+    _konusma(db, "222", "user", "ötekinden")
+
+    metin, _ = konusma.yeni_dokum(db, SAHIP, 0, 60)
+
+    assert "telegramdan" in metin and "panelden" in metin
+    assert "ötekinden" not in metin
+
+
+def test_dokum_damgadan_sonrasini_okur(db):
+    _konusma(db, "111", "user", "eski")
+    _konusma(db, "111", "user", "yeni")
+    ilk = db.execute("SELECT MIN(id) m FROM conversations").fetchone()["m"]
+
+    metin, en_son = konusma.yeni_dokum(db, SAHIP, ilk, 60)
+
+    assert "eski" not in metin and "yeni" in metin
+    assert en_son == ilk + 1
+    assert konusma.yeni_dokum(db, SAHIP, en_son, 60) == ("", None)
 
 
 # ── Hafıza ───────────────────────────────────────────────────────────────────

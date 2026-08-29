@@ -51,6 +51,17 @@ Bir kişisel asistanın "sonradan sor" defterisin. Aşağıdaki konuşma döküm
 
 Şu an: {now}
 
+## SATIRLARIN ZAMANI — ÖNCE BUNU OKU
+Dökümdeki her satır `[gg.aa ss:dd]` ile başlıyor: o cümlenin SÖYLENDİĞİ an.
+"yarın", "cuma", "bu hafta sonu" gibi sözler **şu ana göre değil, o satırın
+kendi damgasına göre** çözülür.
+
+    [08.08 21:47] {ad}: Yarın saat 4 randevum var
+    → olay 09.08'de. Şu an {now} olduğuna göre çoktan geçmiş, ATLA.
+
+Hesapladığın olay zamanı şu andan ÖNCEYSE o olayı yazma; sorulacak vakti
+geçmiştir ve geç kalmış soru sorulmamış sorudan kötüdür.
+
 ## ZATEN BEKLEYENLER
 {mevcut}
 

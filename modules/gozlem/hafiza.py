@@ -83,6 +83,12 @@ Yalnızca kişi hakkında SÜREKLİLİĞİ olan şeyler:
 - Tahmin, yorum, çıkarım zinciri. Kişi söylemediyse yazma.
 - Asistanın kendi cümleleri. Yalnız kullanıcının söyledikleri sayılır.
 
+## SATIRLARIN ZAMANI
+Dökümdeki her satır `[gg.aa ss:dd]` ile başlıyor: o cümlenin söylendiği an.
+"bu dönem", "şu sıralar" gibi sözler o satırın damgasına göre çözülür.
+Eski bir satırdaki geçici bir durum bugün sürüyor olmayabilir — süresi
+belirsizse `gecerlilik` yazmayı tercih et.
+
 ## GEÇİCİ BİLGİLER
 Bir bilgi bir tarihten sonra geçerliliğini yitirecekse `gecerlilik` alanına
 "YYYY-MM-DD" yaz. Süresiz ise null bırak. Bugünün tarihi: {today}

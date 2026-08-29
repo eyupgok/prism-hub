@@ -119,7 +119,9 @@ modules/
     sinyaller.py→ Deterministik sinyal üretimi (SQL + aritmetik). Modelin
                    uydurabileceği hiçbir şey yok; eşikler dosyanın başında.
     konusma.py  → Konuşma dökümü okuma — hafıza ve takip çıkarımlarının
-                   ortak zemini (kanal çözümü + damga + asistan JSON'u ayıklama)
+                   ortak zemini (kanal çözümü + damga + asistan JSON'u ayıklama).
+                   ⚠️ Her satır `[gg.aa ss:dd]` ile başlar; damgayı KALDIRMA
+                   → "Gözlem Katmanı / Takip"
     hafiza.py   → Konuşmalardan KALICI bilgi çıkarımı + yönergeye enjeksiyon
     takip.py    → Konuşmalardan SONRADAN SORULACAK olay çıkarımı
                    ("yarın dişçiye gidiyorum" → ertesi akşam "nasıl geçti?")
@@ -515,6 +517,16 @@ dalgınlık gösterir.
 
 ⚠️ **İşaretleme gönderimden SONRA** (`service.tur`): Telegram'a ulaşılamazsa
 soru sorulmamış sayılıp bir sonraki turda yeniden denenmeli.
+
+⚠️ **Döküm satırları zaman damgası taşır** (`konusma.dokum()` → `[gg.aa ss:dd]`).
+Damgasız dökümde "yarın randevum var" cümlesinin NE ZAMAN söylendiği belli
+olmuyordu; model onu okuduğu ana göre çözüp **üç hafta önce olmuş bitmiş** bir
+randevu için ertesi akşama soru kurdu (gerçekten oldu). Yönergedeki "geçmişte
+kalmış olayları yazma" kuralı da damgasız uygulanamaz — model neyin geçmişte
+kaldığını göremez. Bu, katmanın temel kuralının gereği: **olguyu kod verir**,
+modelden cümlenin ne zaman söylendiğini tahmin etmesi istenemez. İki yönerge de
+(`takip.py`, `hafiza.py`) damganın nasıl okunacağını ayrıca anlatıyor —
+biçim değişirse ikisi de güncellenmeli.
 
 ⚠️ **Adı konmamış olay takip olmaz.** İlk gerçek çıkarım turunda model
 `konu: "randevu"` üretti — çünkü kullanıcının cümlesi de o kadarını
