@@ -12,21 +12,36 @@ değişmemeli. Bu yüzden ses tek yerden, sunucudan geliyor.
 Groq'un seslendirme modeli yalnız İngilizce ve Arapça konuşuyor — Türkçe yok.
 Whisper (ses → metin) Groq'ta, ama tersi başka bir kaynaktan gelmek zorunda.
 
-## Neden edge-tts
+## Neden yerel model değil
 
 Sunucunun 954 MB RAM'i var. Yerel bir model (Piper) teknik olarak sığardı ama
 sentez sırasındaki 200-250 MB'lık sıçrama, bellek daralınca çekirdeğin en şişman
 süreci öldürmesi demek — o da `prism`'in kendisi olurdu. Sesli cevap uğruna
-asistanı kaybetmek kötü bir takas.
+asistanı kaybetmek kötü bir takas. Bir ağ çağrısında ise bellekte yalnız birkaç
+on kilobaytlık ses durur.
 
-`edge-tts` ise bir ağ çağrısı: bellekte yalnız birkaç on kilobaytlık ses durur.
-Anahtar da hesap da istemiyor.
+## Neden ElevenLabs (edge-tts denendi ve elendi)
 
-⚠️ **Tek riski:** kullandığı uç Microsoft'un resmî olarak dışarıya açtığı bir
-API değil, Edge'in "sesli oku" özelliğinin kendi ucu. Bir gün kapanabilir.
-Bu yüzden buradaki her fonksiyon **hata yerine `None` döndürüyor**: ses
-üretilemezse asistan eskisi gibi yazıyla cevap verir, hiçbir şey düşmez.
-Seslendirme bir ikramdır, işin kendisi değil.
+Önce `edge-tts` kullanıldı: bedava, anahtarsız. Ama Türkçede **yalnız iki sesi**
+var (Ahmet, Emel) ve ikisi de "haber spikeri" karakterinde eğitilmiş. Perde ve
+hız ayarı sesin rengini değiştiriyor, TAVRINI değiştirmiyor — JARVIS'i JARVIS
+yapan şey ise tam olarak tavır: ölçülü tempo, vurgusuz ama ölü olmayan bir
+mesafe. Bir spikere ayar çekerek elde edilmiyor.
+
+ElevenLabs'in çok dilli modeli yüzlerce ses arasından seçim yaptırıyor ve
+`stability` / `speed` ile tavır gerçekten ayarlanabiliyor.
+
+⚠️ **Ücretsiz kademe ayda 10.000 karakter.** Ortalama bir yanıt ~120 karakter,
+yani ayda ~80 sesli cevap. Kota bitince API hata döner, `seslendir()` `None`
+verir ve asistan yazıyla devam eder — sessizce bozulmaz ama sesi de kesilir.
+Kalan kota panelde görünüyor (`kota()`).
+
+⚠️ **Yedek motor bilerek YOK.** Kota bitince edge-tts'e düşmek teknik olarak
+kolaydı; yapılmadı, çünkü asistanın sesinin bir gün habersizce değişmesi
+bozulmaktan daha kafa karıştırıcı. Ses kimliğin parçası: ya o ses, ya sessizlik.
+
+⚠️ Buradaki her fonksiyon hata yerine **`None` döndürüyor**. Seslendirme bir
+ikramdır, işin kendisi değil: üretilemezse cevap yazıyla gider.
 """
 
 import asyncio
@@ -40,13 +55,28 @@ from logging_setup import get_logger
 
 log = get_logger("prism.ses")
 
-# JARVIS erkek sesle konuşuyor; varsayılan ona göre. Emel'e geçmek için
-# .env'de TTS_VOICE=tr-TR-EmelNeural yeter, kod değişmez.
-VARSAYILAN_SES = os.getenv("TTS_VOICE", "tr-TR-AhmetNeural")
+API_KOK = "https://api.elevenlabs.io/v1"
+
+# Çok dilli model — Türkçeyi bu konuşuyor. Turbo/flash sürümleri yarı kredi
+# yiyor ama telaffuz belirgin şekilde düşüyor; ayda 80 cevapta tasarrufun
+# anlamı yok.
+MODEL = os.getenv("TTS_MODEL", "eleven_multilingual_v2")
+
+# Daniel — İngiliz, resmî, "steady broadcaster". Adaylar arasından seçildi.
+VARSAYILAN_SES_ID = os.getenv("TTS_VOICE_ID", "onwK4e9ZLuTAKqWW03F9")
+
+# stability: yükseldikçe okuma düzleşir, duygusal dalgalanma azalır. JARVIS'in
+#            tavrı için istenen tam olarak bu; 0.5 altı fazla "oyunculuk" yapıyor.
+# speed:     0.7–1.2 arası. Ölçülü tempo için 1'in biraz altı.
+# style:     0 = abartma yok. JARVIS vurgu yapmaz.
+VARSAYILAN_SAKINLIK = 0.6
+VARSAYILAN_HIZ = 0.95
+SAKINLIK_ARALIGI = (0.0, 1.0)
+HIZ_ARALIGI = (0.7, 1.2)
 
 # Uzun metin uzun ses demek: 3 dakikalık bir sesli özet kimsenin dinlemediği
-# bir şey olur, üstelik üretimi de bekletir. Sınırı aşan metin kesiliyor.
-AZAMI_KARAKTER = int(os.getenv("TTS_MAX_CHARS", "1200"))
+# bir şey olur, üstelik kredi de yakar. Sınırı aşan metin kesiliyor.
+AZAMI_KARAKTER = int(os.getenv("TTS_MAX_CHARS", "600"))
 
 # Sesle okunduğunda saçma duran işaretlerin karşılıkları. Emoji ve etiketler
 # aşağıda toptan eleniyor; bunlar ise elenirse ANLAM kaybediyor.
@@ -134,47 +164,143 @@ def _kirp(metin: str) -> str:
     return kirpik[:kelime] if kelime >= asgari else kirpik
 
 
-async def seslendir(metin: str, ses: Optional[str] = None) -> Optional[bytes]:
-    """Metni MP3'e çevirir. Üretilemezse `None` — çağıran taraf yazıyla devam eder.
+def ayar_coz(kullanici: Optional[dict] = None) -> dict:
+    """Kişinin kayıtlı ses tercihini ElevenLabs'in beklediği biçime çevirir.
 
-    `edge_tts` içeriden import ediliyor: paket kurulmadan `git pull` yapılırsa
-    (deploy sırası böyle) servis açılışta çökmesin diye. Eksikse yalnız ses
-    kaybolur.
+    Kişiye özel, çünkü asistanın sesi kimin dinlediğine bağlı: Eyüp Daniel'i
+    seçebilir, Zeynep başkasını. Sütunlar boşsa varsayılanlara düşüyor —
+    yani hiç ayar yapılmadan da çalışıyor.
     """
+    k = kullanici or {}
+
+    def sayi(deger, varsayilan, aralik):
+        try:
+            d = float(deger)
+        except (TypeError, ValueError):
+            return varsayilan
+        # Panelden gelen değer kaydırıcıyla sınırlı ama API doğrudan da
+        # çağrılabiliyor; aralık dışı bir değer 422 döndürürdü.
+        return min(max(d, aralik[0]), aralik[1])
+
+    return {
+        "ses_id": (k.get("ses_id") or VARSAYILAN_SES_ID).strip(),
+        "stability": sayi(k.get("ses_sakinlik"), VARSAYILAN_SAKINLIK, SAKINLIK_ARALIGI),
+        "speed": sayi(k.get("ses_hiz"), VARSAYILAN_HIZ, HIZ_ARALIGI),
+    }
+
+
+def _istemci(zaman_asimi: float = 60.0):
+    """Anahtarsızsa None — çağıran taraf sessizce sesten vazgeçer."""
+    anahtar = os.getenv("ELEVENLABS_API_KEY", "").strip()
+    if not anahtar:
+        return None
+    import httpx
+
+    return httpx.AsyncClient(timeout=zaman_asimi, headers={"xi-api-key": anahtar})
+
+
+async def seslendir(metin: str, kullanici: Optional[dict] = None) -> Optional[bytes]:
+    """Metni MP3'e çevirir. Üretilemezse `None` — çağıran yazıyla devam eder."""
     metin = temizle(metin)
     if not metin:
         return None
 
-    try:
-        import edge_tts
-    except ImportError:
-        log.warning("edge-tts kurulu değil — seslendirme atlandı (pip install -r requirements.txt)")
+    if not os.getenv("ELEVENLABS_API_KEY", "").strip():
+        log.warning("ELEVENLABS_API_KEY yok — seslendirme atlandı")
         return None
 
+    ayar = ayar_coz(kullanici)
     try:
-        konusma = edge_tts.Communicate(metin, ses or VARSAYILAN_SES)
-        parcalar = [
-            parca["data"] async for parca in konusma.stream()
-            if parca["type"] == "audio"
+        # İstemci kurulumu da try içinde: bu modülün sözleşmesi "asla hata
+        # fırlatma", çağıran taraflar (Telegram döngüsü, gözlem turu) bir
+        # istisnayı beklemiyor.
+        async with _istemci() as c:
+            cevap = await c.post(
+                f"{API_KOK}/text-to-speech/{ayar['ses_id']}",
+                json={
+                    "text": metin,
+                    "model_id": MODEL,
+                    "voice_settings": {
+                        "stability": ayar["stability"],
+                        "similarity_boost": 0.75,
+                        "style": 0.0,
+                        "use_speaker_boost": True,
+                        "speed": ayar["speed"],
+                    },
+                },
+            )
+    except Exception:
+        log.exception("Seslendirme isteği başarısız (%d karakter)", len(metin))
+        return None
+
+    if cevap.status_code != 200:
+        # 401 = anahtar bozuk · 422 = ses kimliği yanlış · 429 = kota bitti.
+        # Üçü de "ses yok" demek ama sebebi log'da dursun, yoksa sessizliğin
+        # neden başladığını anlamanın yolu olmaz.
+        log.warning("Seslendirme reddedildi: %s %s",
+                    cevap.status_code, cevap.text[:200])
+        return None
+
+    return cevap.content or None
+
+
+async def sesler() -> list:
+    """Hesaptaki sesler — panelin açılır listesi bunu çiziyor.
+
+    Liste sabit yazılabilirdi ama ElevenLabs'te ses eklenip çıkarılabiliyor;
+    sabit liste bir gün olmayan bir sesi gösterir ve seçilince 422 gelir.
+    """
+    istemci = _istemci(30.0)
+    if istemci is None:
+        return []
+    try:
+        async with istemci as c:
+            cevap = await c.get(f"{API_KOK}/voices")
+        if cevap.status_code != 200:
+            log.warning("Ses listesi alınamadı: %s", cevap.status_code)
+            return []
+        return [
+            {
+                "id": v["voice_id"],
+                "ad": (v.get("name") or "").split(" - ")[0].strip(),
+                "tarif": (v.get("name") or "").partition(" - ")[2].strip(),
+                "cinsiyet": (v.get("labels") or {}).get("gender", ""),
+                "aksan": (v.get("labels") or {}).get("accent", ""),
+            }
+            for v in cevap.json().get("voices", [])
         ]
     except Exception:
-        log.exception("Seslendirme başarısız (%d karakter)", len(metin))
+        log.exception("Ses listesi alınamadı")
+        return []
+
+
+async def kota() -> Optional[dict]:
+    """Kalan karakter hakkı. Ücretsiz kademe dar (10.000/ay), panelde gösteriliyor."""
+    istemci = _istemci(30.0)
+    if istemci is None:
+        return None
+    try:
+        async with istemci as c:
+            cevap = await c.get(f"{API_KOK}/user/subscription")
+        if cevap.status_code != 200:
+            return None
+        d = cevap.json()
+        kullanilan, sinir = d.get("character_count", 0), d.get("character_limit", 0)
+        return {"kullanilan": kullanilan, "sinir": sinir,
+                "kalan": max(sinir - kullanilan, 0), "kademe": d.get("tier", "")}
+    except Exception:
+        log.exception("Kota okunamadı")
         return None
 
-    if not parcalar:
-        log.warning("Seslendirme boş döndü (%d karakter)", len(metin))
-        return None
-    return b"".join(parcalar)
 
-
-async def seslendir_ogg(metin: str, ses: Optional[str] = None) -> Optional[bytes]:
+async def seslendir_ogg(metin: str, kullanici: Optional[dict] = None) -> Optional[bytes]:
     """Telegram ses notu için OGG/Opus. ffmpeg yoksa `None`.
 
     Telegram'ın dalgalı "ses notu" görünümü (`sendVoice`) OGG/Opus istiyor;
-    edge-tts ise MP3 veriyor. Panel MP3'ü doğrudan çalabildiği için bu çevrim
-    yalnız Telegram yolunda gerekiyor.
+    ElevenLabs ise MP3 veriyor. Panel MP3'ü doğrudan çalabildiği için bu
+    çevrim yalnız Telegram yolunda gerekiyor.
     """
-    mp3 = await seslendir(metin, ses)
+    mp3 = await seslendir(metin, kullanici)
     if not mp3:
         return None
     return await _ogge_cevir(mp3)

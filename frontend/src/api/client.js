@@ -134,12 +134,13 @@ export const api = {
   // Seslendirme: gövde JSON değil ses dosyası, o yüzden request() değil fetch.
   // Dönen adresi çağıran taraf URL.revokeObjectURL ile bırakmalı, yoksa
   // her dinlemede bir blob bellekte kalır.
-  seslendir: async (metin) => {
+  // `deneme` verilirse o ayarlar KAYDEDİLMEDEN kullanılır (Ayarlar'daki Önizle)
+  seslendir: async (metin, deneme = {}) => {
     const res = await fetch(`${BASE_URL}/api/chat/ses`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ metin }),
+      body: JSON.stringify({ metin, ...deneme }),
     })
     if (res.status === 401) {
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
@@ -151,6 +152,9 @@ export const api = {
     }
     return URL.createObjectURL(await res.blob())
   },
+  sesSecenekleri: () => request('/api/chat/ses/secenekler'),
+  sesAyariKaydet: (ayar) =>
+    request('/api/chat/ses/ayar', { method: 'PUT', body: JSON.stringify(ayar) }),
 
   getWeather: () => request('/api/weather/'),
   getSummary: () => request('/api/summary/'),

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Settings as SettingsIcon, Server, Shield, Zap, Info, LogOut } from 'lucide-react'
 import { api } from '../api/client'
+import SesAyari from '../components/SesAyari'
 
 const STACK = [
   { label: 'Frontend', value: 'React 18 + Vite + Tailwind CSS' },
@@ -11,6 +12,7 @@ const STACK = [
   { label: 'AI / NLP', value: 'Groq — llama-3.3-70b-versatile' },
   { label: 'Ses', value: 'Groq Whisper — whisper-large-v3' },
   { label: 'Görsel', value: 'Groq — qwen/qwen3.6-27b' },
+  { label: 'Seslendirme', value: 'ElevenLabs — eleven_multilingual_v2' },
   { label: 'Deploy', value: 'Oracle Cloud VM (systemd + Caddy)' },
 ]
 
@@ -55,6 +57,8 @@ export default function Settings() {
           </p>
         </div>
       </div>
+
+      <SesAyari />
 
       {/* Tech Stack */}
       <div className="glass-card p-5">

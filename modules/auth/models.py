@@ -40,6 +40,7 @@ def create_users_table(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_users_chat ON users(telegram_chat_id)")
     _migrate_konum(conn)
     _migrate_hitap(conn)
+    _migrate_ses(conn)
     _seed_ilk_kullanici(conn)
 
 
@@ -57,6 +58,23 @@ def _migrate_hitap(conn: sqlite3.Connection):
     mevcut = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
     if "hitap" not in mevcut:
         conn.execute("ALTER TABLE users ADD COLUMN hitap TEXT")
+
+
+def _migrate_ses(conn: sqlite3.Connection):
+    """Kişiye özel seslendirme tercihi (idempotent).
+
+    Asistanın sesi kimin dinlediğine bağlı: Eyüp bir ses seçebilir, Zeynep
+    başkasını. Üçü de NULL kalabilir — `ses.ayar_coz()` o zaman varsayılanlara
+    düşüyor, yani hiç doldurulmadan da çalışıyor.
+
+    Panelde Ayarlar sayfasından değiştiriliyor. `.env`'e KONMADI: ses,
+    kurcalayarak bulunan bir şey ("biraz daha yavaş, biraz daha düz") ve her
+    denemede sunucuya girip servisi yeniden başlatmak o döngüyü öldürürdü.
+    """
+    mevcut = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    for sutun, tur in (("ses_id", "TEXT"), ("ses_sakinlik", "REAL"), ("ses_hiz", "REAL")):
+        if sutun not in mevcut:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {sutun} {tur}")
 
 
 def _migrate_konum(conn: sqlite3.Connection):

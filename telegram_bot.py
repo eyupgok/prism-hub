@@ -420,7 +420,10 @@ async def _handle_message(message: Dict[str, Any]):
         try:
             from ses import seslendir_ogg
 
-            konusma = await seslendir_ogg(response_text)
+            # Kişinin kendi ses tercihiyle okunuyor (users.ses_*)
+            from auth import kullanici_getir
+
+            konusma = await seslendir_ogg(response_text, kullanici_getir(owner_id))
             if konusma:
                 await send_voice(konusma, chat_id=chat_id)
         except Exception:

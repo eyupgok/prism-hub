@@ -31,8 +31,9 @@ logging_setup.py     → Tek yerden loglama. `print()` KULLANMA — `get_logger(
 groq_client.py       → Groq çağrıları için ortak sarmalayıcı: JSON modu
                        (response_format) + ana model başarısızsa GROQ_FALLBACK_MODEL
                        + **token bütçesi yedeği** → "Akıl yürüten modeller" bölümü
-ses.py               → Metin → ses (edge-tts). Telegram ses notu + panelin
-                       "Dinle" düğmesi ortak kullanır → "Sesli Cevap"
+ses.py               → Metin → ses (ElevenLabs). Telegram ses notu + panelin
+                       "Dinle" düğmesi ortak kullanır → "Sesli Cevap".
+                       Sözleşmesi: ASLA hata fırlatmaz, üretemezse None
 backup.py            → SQLite backup API ile tutarlı kopya → gzip → Telegram'a dosya
 confirm.py           → Onay bekleyen yıkıcı işlemler (AI ile silme). Bellekte, 5 dk ömürlü.
                        REST/panel silmeleri bu akıştan geçmez — orada kullanıcı zaten
@@ -160,6 +161,9 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
                        kopuk kalıyordu.
                        Sohbet.jsx → panelden AI sohbeti (metin + görsel). iPhone'da
                        Telegram dışında da asistana ulaşılabilsin diye eklendi.
+  src/components/SesAyari.jsx
+                     → Ayarlar'daki ses bölümü: ses seçimi, sakinlik/hız
+                       kaydırıcıları, Önizle, kalan kota
   src/components/KisiSeridi.jsx
                      → Üstteki kişi geçişi + salt görüntüleme işareti (göz simgesi).
                        Tek kullanıcı varsa hiç çizilmez.
@@ -277,7 +281,11 @@ ile yalnız iki alanını okuyor (Gson bilmediği alanları atlıyor).
 
 ```sql
 users        (id, ad, hitap, telegram_chat_id UNIQUE, parola_hash, created_at,
-              sehir, enlem, boylam, konum_at, gozlem_sinir)
+              sehir, enlem, boylam, konum_at, gozlem_sinir,
+              ses_id, ses_sakinlik, ses_hiz)
+              → ses_* = kişiye özel seslendirme tercihi, üçü de NULL olabilir
+                (varsayılana düşer). Panelde Ayarlar → Asistanın Sesi.
+                Göç: _migrate_ses(), idempotent ALTER TABLE
               → gozlem_sinir = günde en fazla kaç KENDİLİĞİNDEN mesaj.
                 **DEFAULT 0 (kapalı)** — kendiliğinden konuşma, asistanın
                 istenmemiş bir mesaj gönderebildiği tek mekanizma; açılması
@@ -912,36 +920,56 @@ dinlemekten kolay.
 
 Panelde ise düğmeye basınca, yani istendiğinde.
 
-### Neden edge-tts
+### Neden ElevenLabs (edge-tts denendi ve elendi)
 
 ⚠️ **Groq'un seslendirmesi Türkçe bilmiyor** (yalnız İngilizce ve Arapça).
 Whisper (ses → metin) Groq'ta ama tersi başka bir kaynaktan gelmek zorunda.
 
 ⚠️ **Yerel model (Piper) bilerek seçilmedi.** Sunucunun 954 MB RAM'i var;
 sentez sırasındaki 200-250 MB'lık sıçrama, bellek daralınca çekirdeğin en
-şişman süreci öldürmesi demek — o da `prism`'in kendisi olurdu. Sesli cevap
-uğruna asistanı kaybetmek kötü bir takas. `edge-tts` ise bir ağ çağrısı:
-bellekte yalnız birkaç on kilobaytlık ses durur, anahtar da hesap da istemiyor.
+şişman süreci öldürmesi demek — o da `prism`'in kendisi olurdu.
 
-⚠️ **Kullandığı uç resmî bir API değil** — Edge'in "sesli oku" özelliğinin
-kendi ucu, Microsoft bir gün kapatabilir. Bu yüzden `ses.py`'deki her fonksiyon
-hata yerine **`None` döndürüyor**: ses üretilemezse asistan eskisi gibi yazıyla
-cevap verir. Seslendirme bir ikram, işin kendisi değil.
+⚠️ **Önce `edge-tts` kullanıldı ve ELENDİ.** Bedava ve anahtarsızdı ama
+Türkçede yalnız **iki sesi** var (Ahmet, Emel) ve ikisi de "haber spikeri"
+karakterinde. Perde/hız ayarı sesin rengini değiştiriyor, **tavrını
+değiştirmiyor** — JARVIS'i JARVIS yapan şey ise tam olarak tavır. Kullanıcının
+ilk tepkisi net oldu: *"sesi hiç ama hiç beğenmedim, JARVIS'in tonu hiç yok."*
+Bir spikere ayar çekerek o ton elde edilmiyor.
 
-### Neden panel de sunucudan ses çekiyor
+ElevenLabs'te ses kütüphaneden seçiliyor ve `stability` / `speed` ile tavır
+gerçekten ayarlanabiliyor. Seçilen: **Daniel** (İngiliz, resmî, "steady
+broadcaster").
 
-Tarayıcının kendi motoru (`speechSynthesis`) bedava ve anındaydı ama sesi
-**her cihazda başka**: iPhone'da bir ses, Android'de başka. Asistanın sesi
-kimliğinin parçası; telefon değişince değişmemeli. Bu yüzden panel de
-Telegram'la aynı motoru kullanıyor — tek fark biçim.
+⚠️ **Ücretsiz kademe ayda 10.000 karakter** — ortalama yanıt ~120 karakter,
+yani ~80 sesli cevap. Kota bitince API 429 döner, `seslendir()` `None` verir,
+asistan yazıyla devam eder. Kalan kota **panelde görünüyor**; görünmezse
+kullanıcı sesin neden kesildiğini anlayamaz, arıza sanar.
 
-| | Panel | Telegram |
-|---|---|---|
-| Biçim | MP3 | OGG/Opus |
-| ffmpeg | gerekmez | **gerekir** (`sudo apt install ffmpeg`) |
+⚠️ **Yedek motor bilerek YOK.** Kota bitince edge-tts'e düşmek kolaydı;
+yapılmadı, çünkü asistanın sesinin bir gün habersizce değişmesi bozulmaktan
+daha kafa karıştırıcı. Ses kimliğin parçası: ya o ses, ya sessizlik.
 
-ffmpeg yoksa `seslendir_ogg()` `None` döner, bir kez log'a yazar ve Telegram
-yalnız metin gönderir. Panel etkilenmez.
+### Ses ayarı: kişiye özel ve PANELDE
+
+`users.ses_id` / `ses_sakinlik` / `ses_hiz` (üçü de NULL olabilir →
+`ses.ayar_coz()` varsayılana düşer). Panelde
+`frontend/src/components/SesAyari.jsx`, Ayarlar sayfasında.
+
+⚠️ **`.env`'e KONMADI ve Android uygulamasına da konmadı.** Ses kurcalayarak
+bulunan bir şey ("biraz daha yavaş, biraz daha düz"): `.env` her deneme için
+sunucuya girip servisi yeniden başlatmak, Android ise her deneme için APK
+derleyip telefona kurmak demekti. İkisi de o döngüyü öldürürdü. Ayrıca
+Android tarafı bilerek sensöre indirgendi (bkz. "Android: sensör uygulaması").
+
+⚠️ **Önizleme KAYDETMEDEN çalışıyor:** `POST /api/chat/ses` gövdesinde
+`ses_id`/`ses_sakinlik`/`ses_hiz` gelirse kullanıcının kayıtlı ayarının
+üstüne geçici olarak biniyor. Aksi hâlde her deneme "kaydet, dinle, beğenme,
+geri al" olurdu.
+
+Uçlar: `GET /api/chat/ses/secenekler` (ses listesi + kota + mevcut ayar) ·
+`PUT /api/chat/ses/ayar` (kaydet) · `POST /api/chat/ses` (seslendir).
+Ses listesi API'den geliyor, sabit yazılmadı: ElevenLabs'te ses eklenip
+çıkarılabiliyor, sabit liste bir gün olmayan bir sesi gösterip 422 aldırır.
 
 ### Metin temizliği
 
@@ -1075,9 +1103,13 @@ PANEL_PASSWORD           → SADECE İLK KURULUMDA okunur: users tablosu boşken
 PANEL_USER_NAME          → İlk kullanıcının adı (varsayılan: Eyüp). Sadece ilk kurulumda.
 SESSION_SECRET           → Panel oturum biletinin imza anahtarı. Yoksa API_KEY'e düşer
                             (eski davranış). Değişirse açık oturumların hepsi düşer.
-TTS_VOICE                → Asistanın sesi (varsayılan: tr-TR-AhmetNeural).
-                            Kadın ses için tr-TR-EmelNeural. Kod değişmez.
-TTS_MAX_CHARS            → Seslendirilecek azami karakter (varsayılan 1200)
+ELEVENLABS_API_KEY       → Seslendirme anahtarı. Yoksa ses hiç üretilmez,
+                            asistan yazıyla çalışır. Yetkiler: Text to Speech
+                            = Access, Voices = Read, User = Access.
+TTS_VOICE_ID             → VARSAYILAN ses (Daniel: onwK4e9ZLuTAKqWW03F9).
+                            Kişi başına ayar users tablosunda, panelden.
+TTS_MODEL                → eleven_multilingual_v2 (turbo/flash telaffuzu düşürür)
+TTS_MAX_CHARS            → Seslendirilecek azami karakter (varsayılan 600)
 EXPENSE_DUPLICATE_WINDOW_MINUTES → Aynı tutarlı ikinci bildirimin çift sayılacağı aralık (varsayılan 5)
 WEBHOOK_URL              → Genel HTTPS adresi (Telegram webhook için: https://kendi-alan-adin.example.com)
 PANEL_URL                → Panelin adresi. Yazılmazsa WEBHOOK_URL kullanılır (ikisi aynı

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -39,6 +41,16 @@ class ChatMessage(BaseModel):
 
 class SeslendirilecekMetin(BaseModel):
     metin: str
+    # Önizleme için geçici üstünü yazma (kaydedilmez)
+    ses_id: Optional[str] = None
+    ses_sakinlik: Optional[float] = None
+    ses_hiz: Optional[float] = None
+
+
+class SesAyari(BaseModel):
+    ses_id: Optional[str] = None
+    ses_sakinlik: Optional[float] = None
+    ses_hiz: Optional[float] = None
 
 
 def sohbet_kovasi(user: dict) -> str:
@@ -86,7 +98,14 @@ async def chat_ses(
     """
     from ses import seslendir
 
-    mp3 = await seslendir(data.metin)
+    # Kişinin kayıtlı tercihiyle okunuyor; Ayarlar'daki "Önizle" düğmesi ise
+    # HENÜZ KAYDEDİLMEMİŞ değerleri gövdede yolluyor. Kaydetmeden dinleyememek
+    # ses ayarını kullanılmaz hâle getirirdi — her deneme için "kaydet, dinle,
+    # beğenmedin, geri al" demek olurdu.
+    deneme = data.model_dump(exclude_none=True)
+    kisi = {**user, **{k: v for k, v in deneme.items() if k.startswith("ses_")}}
+
+    mp3 = await seslendir(data.metin, kisi)
     if not mp3:
         raise HTTPException(status_code=503, detail="Seslendirme şu an kullanılamıyor")
 
@@ -96,6 +115,57 @@ async def chat_ses(
         # Aynı metin iki kez çalınırsa ikinci sefer ağa çıkmasın
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+@router.get("/ses/secenekler")
+async def ses_secenekleri(user: dict = Depends(verify_api_key)):
+    """Panelin Ayarlar sayfasındaki ses bölümünü besleyen tek çağrı.
+
+    Kota da burada: ücretsiz kademe ayda 10.000 karakter ve bu, ortalama bir
+    yanıtta ~80 sesli cevap demek. Kullanıcı sesinin neden bir gün kesildiğini
+    anlayabilmeli — rakamı görmezse arıza sanır.
+    """
+    import ses
+
+    return {
+        "sesler": await ses.sesler(),
+        "kota": await ses.kota(),
+        "ayar": ses.ayar_coz(user),
+        "sinirlar": {
+            "sakinlik": list(ses.SAKINLIK_ARALIGI),
+            "hiz": list(ses.HIZ_ARALIGI),
+        },
+    }
+
+
+@router.put("/ses/ayar")
+async def ses_ayari_kaydet(data: SesAyari, user: dict = Depends(verify_api_key)):
+    """Ses tercihini KENDİ satırına yazar.
+
+    `?kisi=` burada geçerli değil: yazma her zaman giriş yapanın kendi
+    verisine gider (bkz. CLAUDE.md "İki Kullanıcı"). Başkasının asistan
+    sesini değiştirmek diye bir şey yok.
+    """
+    from database import get_db
+    from ses import HIZ_ARALIGI, SAKINLIK_ARALIGI
+
+    def sinirla(deger, aralik):
+        return None if deger is None else min(max(float(deger), aralik[0]), aralik[1])
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE users SET ses_id = ?, ses_sakinlik = ?, ses_hiz = ? WHERE id = ?",
+            (
+                (data.ses_id or "").strip() or None,
+                sinirla(data.ses_sakinlik, SAKINLIK_ARALIGI),
+                sinirla(data.ses_hiz, HIZ_ARALIGI),
+                user["id"],
+            ),
+        )
+        guncel = dict(conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
+
+    from ses import ayar_coz
+    return {"ayar": ayar_coz(guncel)}
 
 
 @router.post("/voice")
