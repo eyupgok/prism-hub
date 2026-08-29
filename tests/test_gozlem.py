@@ -141,6 +141,30 @@ def test_harcama_sessizligi_akis_kesilince_uyarir(db):
     assert "10 gün önce" in s["kanit"]
 
 
+def test_harcama_sessizligi_ariza_olarak_isaretli(db):
+    """İlk gerçek turda model bunu görüp 'kullanıcı zaten biliyor olabilir'
+    diyerek sustu. Arızanın tanımı gereği kullanıcı bilmiyor — bilseydi
+    düzeltmişti. Kategori, modelin susma eşiğini tersine çeviriyor."""
+    eski = _an(gun_farki=-10)
+    for _ in range(sinyaller.SESSIZLIK_ASGARI_GECMIS):
+        _harcama(db, SAHIP, 50, kaynak="notification", source_at=eski.isoformat())
+
+    assert sinyaller.harcama_sessizligi(db, SAHIP, _an())["kategori"] == sinyaller.ARIZA
+
+
+def test_diger_sinyaller_durum(db):
+    """Ağırlıkla karıştırılmamalı: butce_asildi da ağırlık 3 ama arıza değil —
+    kullanıcı %80'de zaten uyarı almış oluyor."""
+    from modules.expenses import service as exp
+
+    exp.set_budget(db, SAHIP, "yemek", 1000)
+    _harcama(db, SAHIP, 1200, "yemek")
+
+    s = sinyaller.butce(db, SAHIP, _an())[0]
+    assert s["agirlik"] == 3
+    assert s["kategori"] == sinyaller.DURUM
+
+
 def test_harcama_sessizligi_akis_surerken_susar(db):
     dun = _an(gun_farki=-1)
     for _ in range(sinyaller.SESSIZLIK_ASGARI_GECMIS):
@@ -460,6 +484,49 @@ async def test_kapali_kullanici_kuru_turda_denenebilir(db, sinyalli, konusan_mod
 
     assert sonuc["karar"] == "konustu"
     assert konusan_model == []
+
+
+@pytest.mark.asyncio
+async def test_sinyal_turu_yonergeye_giriyor(db, monkeypatch):
+    """Model, susma eşiğini ancak türü görürse ayarlayabilir."""
+    gorulen_yonerge = []
+
+    async def ariza_veren(conn, owner_id, user, now=None):
+        return [{"anahtar": "bozuk_sey", "kanit": "bir şey durmuş",
+                 "agirlik": 3, "kategori": sinyaller.ARIZA}]
+
+    async def yakalayan(messages, **kw):
+        gorulen_yonerge.append(messages[0]["content"])
+        return {"soyle": False, "sebep": "deneme"}
+
+    import groq_client
+    monkeypatch.setattr(sinyaller, "topla", ariza_veren)
+    monkeypatch.setattr(groq_client, "complete_json", yakalayan)
+    _ac(db)
+
+    await service.tur(SAHIP, now=_an())
+
+    assert "[ARIZA] [bozuk_sey]" in gorulen_yonerge[0]
+    assert "varsayılan\n  **söylemektir**" in gorulen_yonerge[0]
+
+
+@pytest.mark.asyncio
+async def test_kategorisiz_sinyal_durum_sayilir(db, sinyalli, monkeypatch):
+    """`sinyalli` fikstürü kategori vermiyor — eski biçimli bir sinyal
+    yönergeyi kırmamalı."""
+    gorulen = []
+
+    async def yakalayan(messages, **kw):
+        gorulen.append(messages[0]["content"])
+        return {"soyle": False, "sebep": "deneme"}
+
+    import groq_client
+    monkeypatch.setattr(groq_client, "complete_json", yakalayan)
+    _ac(db)
+
+    await service.tur(SAHIP, now=_an())
+
+    assert "[DURUM] [test_konu]" in gorulen[0]
 
 
 @pytest.mark.asyncio

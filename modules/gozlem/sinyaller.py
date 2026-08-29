@@ -88,8 +88,25 @@ def _para(deger: float) -> str:
     return f"{deger:,.0f}".replace(",", ".")
 
 
-def _sinyal(anahtar: str, kanit: str, agirlik: int = 2) -> Dict[str, Any]:
-    return {"anahtar": anahtar, "kanit": kanit, "agirlik": agirlik}
+# Sinyalin türü — modelin susma eşiğini belirliyor:
+#
+#   durum  → kullanıcının taraf olduğu bir hâl (bütçe, görev yığılması, hava).
+#            Varsayılan SUSMAK; söylemek için gerçek bir sebep gerekiyor.
+#   ariza  → bozulmuş ve düzeltilebilir bir şey. Varsayılan TERSİNE DÖNER.
+#
+# Ayrım ilk gerçek turda ortaya çıktı: model `harcama_sessizligi` sinyalini
+# görüp "kullanıcı zaten biliyor olabilir" diyerek sustu. Oysa arızanın tanımı
+# gereği kullanıcı bilmiyor — bilseydi düzeltmişti. Bu tam da asistanın
+# kullanıcıdan önce fark etmesi beklenen şeydi.
+#
+# Ağırlıkla karıştırılmamalı: `butce_asildi` da ağırlık 3 ama arıza değil,
+# kullanıcı zaten %80'de uyarı almış oluyor.
+DURUM = "durum"
+ARIZA = "ariza"
+
+
+def _sinyal(anahtar: str, kanit: str, agirlik: int = 2, kategori: str = DURUM) -> Dict[str, Any]:
+    return {"anahtar": anahtar, "kanit": kanit, "agirlik": agirlik, "kategori": kategori}
 
 
 # ── Harcama tarafı ───────────────────────────────────────────────────────────
@@ -127,8 +144,11 @@ def harcama_sessizligi(conn, owner_id: int, now: datetime) -> Optional[Dict]:
     return _sinyal(
         "harcama_sessizligi",
         f"telefondan otomatik gelen son harcama kaydı {gun} gün önce; "
-        f"daha önce toplam {row['c']} kayıt bu yoldan gelmişti",
+        f"daha önce toplam {row['c']} kayıt bu yoldan gelmişti. "
+        f"Muhtemel sebep: telefondaki dinleyici servisi durmuş "
+        f"(uygulamayı açıp Ayarlar'daki durum kartına bakmak yeterli)",
         agirlik=3,
+        kategori=ARIZA,
     )
 
 

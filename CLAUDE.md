@@ -393,6 +393,27 @@ isim uyduramaz.
 | `tamamlama_orani` | Kurma hızı bitirme hızını çok aşıyor | 1 |
 | `ev_halki:<id>` | Diğer kişinin yaklaşan Kritik/Önemli görevi | 1 |
 
+### Sinyal türü: DURUM vs ARIZA
+
+Her sinyalin bir `kategori`si var ve bu, **modelin susma eşiğini tersine
+çevirebiliyor**:
+
+- **`DURUM`** — kullanıcının taraf olduğu bir hâl (bütçe, görev, hava).
+  Varsayılan susmak; söylemek için sebep gerekir.
+- **`ARIZA`** — bozulmuş ve düzeltilebilir bir şey. Varsayılan **söylemek**.
+
+⚠️ Ayrım ilk gerçek turda ortaya çıktı: model `harcama_sessizligi`'ni görüp
+*"kullanıcı zaten biliyor olabilir"* diyerek sustu — oysa dinleyici gerçekten
+ölmüştü. **Arızanın tanımı gereği kullanıcı bilmiyor**; bilseydi düzeltmişti.
+Asistanın kullanıcıdan önce fark etmesi beklenen şey tam olarak buydu.
+
+⚠️ **Ağırlıkla karıştırma.** `butce_asildi` de ağırlık 3 ama `DURUM`:
+kullanıcı zaten %80'de uyarı almış oluyor. Ağırlık "ne kadar önemli",
+kategori "kullanıcının haberi var mı" sorusunu cevaplıyor.
+
+Yönergedeki 1. kural da aynı turda sıkılaştırıldı: *"zaten biliyor olabilir"*
+susmak için yeterli değil, bildiğini düşünmek için somut bir sebep gerekiyor.
+
 ⚠️ `anahtar` **konu kimliği**: aynı anahtar `KONU_BEKLEME_GUNU` (3 gün) tekrar
 seçilemiyor. Bu yüzden anahtar sabit olmalı — `gecikmis_gorevler` bilerek sayı
 içermiyor; içerseydi sayı her değiştiğinde "yeni konu" sanılıp aynı şey her gün

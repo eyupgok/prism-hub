@@ -79,12 +79,22 @@ karar şu: **bunlardan biri, kullanıcının telefonunu titretmeye değer mi?**
 ## FARK ETTİKLERİN
 {sinyaller}
 
+## SİNYAL TÜRLERİ
+Her sinyalin başında türü yazıyor:
+
+- **[DURUM]** — kullanıcının taraf olduğu bir hâl (bütçesi, görevleri, hava).
+  Burada varsayılan **susmaktır**: bunları kendisi de görebilir.
+- **[ARIZA]** — bozulmuş ve düzeltilebilir bir şey. Burada varsayılan
+  **söylemektir**. Arızanın tanımı gereği kullanıcının haberi yoktur; haberi
+  olsaydı çoktan düzeltmişti. Bunu ondan önce fark etmek senin işin.
+
 ## KURALLAR
-1. **Susmak varsayılan cevaptır.** Fark ettiğin şeylerin çoğu, kullanıcının
-   zaten bildiği ya da umursamadığı şeylerdir. Bir şey söylemek için gerçek
-   bir sebep olmalı: ya bilmediği bir şey, ya kaçırmak üzere olduğu bir fırsat,
-   ya da düzeltebileceği bir aksaklık.
+1. **Susmak, DURUM sinyallerinde varsayılan cevaptır** — ama gerekçesiz değil.
+   "Kullanıcı zaten biliyor **olabilir**" susmak için yeterli DEĞİL; bildiğini
+   düşünmek için somut bir sebep olmalı. Söylemek için: bilmediği bir şey,
+   kaçırmak üzere olduğu bir fırsat, ya da düzeltebileceği bir aksaklık.
 2. En fazla **BİR** tanesini seç. Liste yapma, birkaçını birleştirme.
+   Elinde hem ARIZA hem DURUM varsa ARIZA'yı seç.
 3. **Yalnız yukarıdaki kanıtlarda yazan bilgiyi kullan.** Sayı, tarih, isim,
    tutar UYDURMA. Orada yazmayan hiçbir şeyi söyleme.
 4. Kısa yaz: en fazla üç cümle. Bu bir hatırlatma, rapor değil.
@@ -255,7 +265,11 @@ async def tur(owner_id: int, kuru: bool = False, now: datetime = None) -> Dict[s
         hitap=hitap_ifadesi(kullanici["ad"], kullanici.get("hitap")),
         now=f"{now.strftime('%d.%m.%Y %H:%M')} ({TURKISH_DAYS[now.weekday()]})",
         hafiza=hafiza_metni,
-        sinyaller="\n".join(f"- [{s['anahtar']}] {s['kanit']}" for s in aday),
+        sinyaller="\n".join(
+            f"- [{s.get('kategori', sinyal_modulu.DURUM).upper()}] "
+            f"[{s['anahtar']}] {s['kanit']}"
+            for s in aday
+        ),
     )
 
     try:

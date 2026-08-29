@@ -135,7 +135,7 @@ def sinyal_goster(ad: str):
         print("  Şu an dikkat çeken bir şey yok. (Olağan hâl.)")
         return
     for s in bulunan:
-        print(f"  [{s['agirlik']}] {s['anahtar']}")
+        print(f"  [{s['agirlik']}] [{s.get('kategori', 'durum').upper()}] {s['anahtar']}")
         print(f"      {s['kanit']}")
 
 
@@ -161,7 +161,8 @@ def tur_calistir(ad: str, gercek: bool):
     if sonuc.get("sinyaller"):
         print(f"\n  Elindeki sinyaller ({len(sonuc['sinyaller'])}):")
         for s in sonuc["sinyaller"]:
-            print(f"    [{s['agirlik']}] {s['anahtar']} — {s['kanit']}")
+            tur = s.get("kategori", "durum").upper()
+            print(f"    [{s['agirlik']}] [{tur}] {s['anahtar']} — {s['kanit']}")
 
     if sonuc.get("mesaj"):
         print(f"\n  Konu: {sonuc.get('anahtar')}")
