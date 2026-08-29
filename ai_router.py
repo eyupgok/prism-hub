@@ -268,7 +268,9 @@ async def parse_message(
         messages.extend(history)
     messages.append({"role": "user", "content": user_message})
 
-    return await complete_json(messages, max_tokens=500)
+    # Akıl yürüten modellerde (gpt-oss) düşünme adımları da bu bütçeden yiyor.
+    # Çoklu komut çıktısı zaten uzun; dar bırakmak JSON'u yarıda kesiyor.
+    return await complete_json(messages, max_tokens=900)
 
 
 # Tek mesajda çalıştırılacak azami komut sayısı — modelin uçmuş bir çıktısı

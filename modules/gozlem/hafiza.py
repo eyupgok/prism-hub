@@ -299,7 +299,7 @@ async def cikar(owner_id: int) -> List[str]:
         sonuc = await complete_json(
             [{"role": "system", "content": yonerge},
              {"role": "user", "content": dokum}],
-            max_tokens=600,
+            max_tokens=900,          # akıl yürütme payı (bkz. groq_client)
             temperature=0.2,
         )
         adaylar = sonuc.get("bilgiler") or []

@@ -276,7 +276,10 @@ async def tur(owner_id: int, kuru: bool = False, now: datetime = None) -> Dict[s
         karar = await complete_json(
             [{"role": "system", "content": yonerge},
              {"role": "user", "content": "Söylenmeye değer bir şey var mı?"}],
-            max_tokens=300,
+            # Yönerge uzun ve karar düşünmeyi gerektiriyor; akıl yürüten
+            # modellerde (gpt-oss) o düşünme de bütçeden yiyor. 300 ile ilk
+            # gerçek turda hiç JSON üretilemedi.
+            max_tokens=900,
             temperature=0.4,        # sabit onay metinlerinden daha serbest, sohbetten daha ölçülü
         )
     except Exception:

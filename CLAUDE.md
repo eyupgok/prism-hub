@@ -30,6 +30,7 @@ logging_setup.py     → Tek yerden loglama. `print()` KULLANMA — `get_logger(
                        httpx/apscheduler gürültüsü kısılmış. LOG_LEVEL env ile ayarlanır.
 groq_client.py       → Groq çağrıları için ortak sarmalayıcı: JSON modu
                        (response_format) + ana model başarısızsa GROQ_FALLBACK_MODEL
+                       + **token bütçesi yedeği** → "Akıl yürüten modeller" bölümü
 backup.py            → SQLite backup API ile tutarlı kopya → gzip → Telegram'a dosya
 confirm.py           → Onay bekleyen yıkıcı işlemler (AI ile silme). Bellekte, 5 dk ömürlü.
                        REST/panel silmeleri bu akıştan geçmez — orada kullanıcı zaten
@@ -844,6 +845,36 @@ DATABASE_PATH            → prism.db (varsayılan)
 4. `ai_router.py` system prompt'una aksiyonları ekle
 5. `ai_router.py:dispatch()`'e `if module == "yenimodul":` bloğu ekle
 6. `main.py`'ye `app.include_router(...)` ekle
+
+## Akıl Yürüten Modeller ve Token Bütçesi
+
+`GROQ_MODEL` bir **akıl yürüten** modelse (`openai/gpt-oss-*` ailesi gibi),
+model cevabı vermeden önce içeriden düşünme adımları üretiyor ve **o adımlar
+da `max_tokens` bütçesinden yiyor.** Bütçe dolunca JSON yarım kalıyor ve Groq
+400 döndürüyor:
+
+```
+json_validate_failed: max completion tokens reached before generating a valid document
+```
+
+⚠️ Bu **sessiz** bir arıza: çağıran taraf sadece "yanıt alınamadı" görüyor,
+sebebi görmüyor. Gözlem katmanının ilk gerçek turunda tam olarak bu oldu —
+`max_tokens=300` ile hiçbir zaman geçerli JSON üretilemedi, yedek model de
+aynı aileden olduğu için o da düştü.
+
+**İki katmanlı savunma:**
+
+1. `groq_client.complete_json()` bu hatayı tanıyıp **aynı modeli**
+   `TOKEN_ARTIS_KATI` (3) katı bütçeyle bir kez daha deniyor. Yedek modele
+   geçmek işe yaramıyor — o da aynı aileden olabiliyor.
+2. Çağrı yerlerindeki taban değerler düşünme payı bırakacak şekilde büyütüldü:
+   `parse_message` 900 · gözlem turu 900 · hafıza çıkarımı 900 · ingest 600.
+
+`max_tokens` bir tavan, hedef değil — model işi bitince duruyor, yani geniş
+bırakmanın maliyeti yok. Yeni bir Groq çağrısı eklerken dar tutma.
+
+`tests/test_groq_client.py` yeniden deneme mantığını kilitliyor: bütçe hatası
+→ aynı model geniş bütçeyle, başka hata → doğrudan yedek modele.
 
 ## Geliştirme Notları
 

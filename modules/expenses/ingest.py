@@ -117,7 +117,10 @@ async def parse_notification(title: str, text: str) -> Dict[str, Any]:
             {"role": "system", "content": _PARSE_PROMPT},
             {"role": "user", "content": content},
         ],
-        max_tokens=300,
+        # Akıl yürüten modellerde düşünme adımları da bu bütçeden yiyor
+        # (bkz. groq_client.TOKEN_ARTIS_KATI). Çıktı küçük ama pay bırakmak
+        # gerekiyor: bu yol sessizce başarısız olursa harcama hiç kaydedilmez.
+        max_tokens=600,
     )
 
     amount = parsed.get("amount")

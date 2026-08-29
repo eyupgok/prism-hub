@@ -40,6 +40,25 @@ def _unsupported_json_mode(error: Exception) -> bool:
     return "response_format" in text or "json_object" in text
 
 
+# Akıl yürüten modeller (`gpt-oss` ailesi gibi) cevabı vermeden önce içeriden
+# düşünme adımları üretiyor ve o adımlar da `max_tokens` bütçesinden yiyor.
+# Bütçe dolunca JSON yarım kalıyor, Groq da 400 dönüyor:
+#
+#   json_validate_failed: max completion tokens reached before
+#                         generating a valid document
+#
+# Kodun her yerindeki `max_tokens` değerleri bu modellere geçilmeden önce
+# belirlenmişti; hepsi birden dar kaldı. Tek tek büyütmek yerine burada
+# merkezî bir yedek var: bütçe yüzünden düşen çağrı, aynı modelle daha geniş
+# bütçeyle bir kez daha deneniyor. Böylece yeni bir çağrı eklerken aynı tuzağa
+# düşmek mümkün olmuyor.
+TOKEN_ARTIS_KATI = 3
+
+
+def _token_yetmedi(error: Exception) -> bool:
+    return "max completion tokens" in str(error).lower()
+
+
 def extract_json(raw: str) -> Dict[str, Any]:
     """Yanıttan JSON çıkarır. JSON modu açıkken gerekmez ama yedek olarak duruyor."""
     cleaned = raw.strip()
@@ -97,14 +116,28 @@ async def complete_json(
     last_error: Optional[Exception] = None
 
     for index, model in enumerate(candidates):
-        try:
-            raw = await _call(client, model, messages, max_tokens, temperature, json_mode=True)
-            parsed = extract_json(raw)
-            if index > 0:
-                log.warning("Yanıt yedek modelden alındı: %s", model)
-            return parsed
-        except Exception as e:
-            last_error = e
-            log.warning("Groq isteği başarısız (model=%s): %s: %s", model, type(e).__name__, e)
+        butce = max_tokens
+        while True:
+            try:
+                raw = await _call(client, model, messages, butce, temperature, json_mode=True)
+                parsed = extract_json(raw)
+                if index > 0:
+                    log.warning("Yanıt yedek modelden alındı: %s", model)
+                return parsed
+            except Exception as e:
+                last_error = e
+                # Bütçe yüzünden düştüyse aynı modele bir kez daha, daha geniş
+                # bütçeyle şans ver — yedek model de aynı aileden olabilir ve
+                # ona geçmek sorunu çözmez (nitekim çözmedi).
+                if _token_yetmedi(e) and butce == max_tokens:
+                    butce = max_tokens * TOKEN_ARTIS_KATI
+                    log.info(
+                        "Model %s bütçeyi doldurdu (akıl yürütme), %d token ile tekrar",
+                        model, butce,
+                    )
+                    continue
+                log.warning("Groq isteği başarısız (model=%s): %s: %s",
+                            model, type(e).__name__, e)
+                break
 
     raise last_error if last_error else RuntimeError("Groq'tan yanıt alınamadı")
