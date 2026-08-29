@@ -411,6 +411,9 @@ def test_hava_uyarisi_yagmuru_saatiyle_bildiriyor(db):
     assert bulunan[0]["anahtar"] == f"hava_uyarisi:{now.date().isoformat()}"
     assert "18:00-21:00" in bulunan[0]["kanit"]
     assert "bugün" in bulunan[0]["kanit"]
+    # HABER, DURUM değil: yarının havasını kullanıcının görmesinin yolu yok,
+    # DURUM olsaydı model haklı olarak susardı (bir kez sustu da).
+    assert bulunan[0]["kategori"] == sinyaller.HABER
 
 
 def test_hava_uyarisi_cisentiyi_konu_etmiyor(db):

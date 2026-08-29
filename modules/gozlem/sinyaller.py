@@ -108,6 +108,12 @@ def _para(deger: float) -> str:
 #   takip  → kullanıcının kendi ağzından çıkmış, sonucu sorulacak bir olay.
 #            Varsayılan SORMAK: sormamak ilgisizliktir, sorulacak şeyi
 #            kullanıcı zaten kendisi söylemiştir.
+#   haber  → kullanıcının BİLMESİNE İMKÂN OLMAYAN, dışarıdan gelen bilgi
+#            (hava tahmini). Varsayılan SÖYLEMEK — ama kısa, tek cümle.
+#            Hava önce `durum`du ve model haklı olarak sustu: DURUM'un tanımı
+#            "bunları kendisi de görebilir"di, oysa yarının havasını görmesinin
+#            hiçbir yolu yok. Kategori "ne kadar önemli"yi değil "kullanıcının
+#            haberi var mı"yı cevaplıyor; tahminde cevap kesin olarak hayır.
 #
 # Ayrım ilk gerçek turda ortaya çıktı: model `harcama_sessizligi` sinyalini
 # görüp "kullanıcı zaten biliyor olabilir" diyerek sustu. Oysa arızanın tanımı
@@ -119,6 +125,7 @@ def _para(deger: float) -> str:
 DURUM = "durum"
 ARIZA = "ariza"
 TAKIP = "takip"
+HABER = "haber"
 
 
 def _sinyal(anahtar: str, kanit: str, agirlik: int = 2, kategori: str = DURUM) -> Dict[str, Any]:
@@ -539,7 +546,8 @@ def hava_uyarisi(tahmin: Dict, now: datetime) -> List[Dict]:
         else:
             continue
 
-        bulunan.append(_sinyal(f"hava_uyarisi:{gun.isoformat()}", kanit, agirlik=agirlik))
+        bulunan.append(_sinyal(f"hava_uyarisi:{gun.isoformat()}", kanit,
+                               agirlik=agirlik, kategori=HABER))
 
     return bulunan
 

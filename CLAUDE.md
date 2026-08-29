@@ -408,11 +408,11 @@ isim uyduramaz.
 | `gecikmis_gorevler` | Vadesi geçmiş, tamamlanmamış yığın | 2 |
 | `inatci_gorev:<id>` | Çok ertelenmiş / uzun süredir duran tek görev (en fazla 2) | 2 |
 | `hava_cakismasi:<id>` | Yaklaşan **tek seferlik** görevin saatinde yağış / aşırı sıcak-soğuk | 2 |
-| `hava_uyarisi:<gün>` | Görevden bağımsız kayda değer hava (bugün / yarın) | 1–2 |
+| `hava_uyarisi:<gün>` | Görevden bağımsız kayda değer hava (bugün / yarın) — `HABER` | 1–2 |
 | `tamamlama_orani` | Kurma hızı bitirme hızını çok aşıyor | 1 |
 | `ev_halki:<id>` | Diğer kişinin yaklaşan Kritik/Önemli görevi | 1 |
 
-### Sinyal türü: DURUM / ARIZA / TAKIP
+### Sinyal türü: DURUM / ARIZA / TAKIP / HABER
 
 Her sinyalin bir `kategori`si var ve bu, **modelin susma eşiğini tersine
 çevirebiliyor**:
@@ -423,6 +423,8 @@ Her sinyalin bir `kategori`si var ve bu, **modelin susma eşiğini tersine
 - **`TAKIP`** — kullanıcının kendi ağzından çıkmış bir olayın sonucu.
   Varsayılan **sormak**: sorulacak şeyi kendisi söylemişti, sormamak
   ilgisizlik olur.
+- **`HABER`** — kullanıcının **bilmesine imkân olmayan**, dışarıdan gelen
+  bilgi (hava tahmini). Varsayılan **söylemek**, ama tek cümle.
 
 ⚠️ Ayrım ilk gerçek turda ortaya çıktı: model `harcama_sessizligi`'ni görüp
 *"kullanıcı zaten biliyor olabilir"* diyerek sustu — oysa dinleyici gerçekten
@@ -432,6 +434,13 @@ Asistanın kullanıcıdan önce fark etmesi beklenen şey tam olarak buydu.
 ⚠️ **Ağırlıkla karıştırma.** `butce_asildi` de ağırlık 3 ama `DURUM`:
 kullanıcı zaten %80'de uyarı almış oluyor. Ağırlık "ne kadar önemli",
 kategori "kullanıcının haberi var mı" sorusunu cevaplıyor.
+
+⚠️ `HABER` de aynı ayrımdan doğdu. `hava_uyarisi` önce `DURUM`du ve model
+sustu: *"acil bir durum bulunmuyor."* Kuralı doğru uygulamıştı — DURUM'un
+tanımı "bunları kendisi de görebilir"di, oysa **yarının havasını görmesinin
+hiçbir yolu yok**. Haberin değeri aciliyetinden değil, kullanıcının onu başka
+türlü öğrenememesinden geliyor. Yönergedeki seçim sırası artık:
+TAKIP/ARIZA → HABER → DURUM.
 
 Yönergedeki 1. kural da aynı turda sıkılaştırıldı: *"zaten biliyor olabilir"*
 susmak için yeterli değil, bildiğini düşünmek için somut bir sebep gerekiyor.
