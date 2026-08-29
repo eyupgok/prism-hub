@@ -110,6 +110,27 @@ async def send_document(
         return resp.json()
 
 
+async def send_voice(
+    ogg_bytes: bytes,
+    caption: str = "",
+    chat_id: Optional[str] = None,
+) -> Dict:
+    """Ses notu gönderir (dalgalı, tıklayınca çalan Telegram biçimi).
+
+    OGG/Opus şart — `ses.seslendir_ogg()` bu yüzden ffmpeg'den geçiyor.
+    Başarısızlık burada yutulmuyor ama çağıran taraf zaten metni ayrıca
+    gönderdiği için ses kaybolsa da cevap kaybolmuyor.
+    """
+    target = chat_id or TELEGRAM_CHAT_ID
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            _api_url("sendVoice"),
+            data={"chat_id": target, "caption": caption, "parse_mode": "HTML"},
+            files={"voice": ("prism.ogg", ogg_bytes, "audio/ogg")},
+        )
+        return resp.json()
+
+
 async def send_reminder_notification(reminder: Dict[str, Any]):
     """Hatırlatıcıyı SAHİBİNİN sohbetine yollar — herkes kendi görevini görür."""
     from modules.reminders.service import format_reminder_notification
@@ -390,6 +411,20 @@ async def _handle_message(message: Dict[str, Any]):
         await edit_message(chat_id, processing_id, response_text)
     else:
         await send_message(response_text, chat_id=chat_id)
+
+    # Sesle sorana sesle cevap. Yazana yazıyla — "Kaydedildi." için ses notu
+    # göndermek, dokunup dinlemeyi gerektirdiği için düz yazıdan daha yorucu
+    # olurdu. Metin yukarıda zaten gönderildi; ses onun yerine değil YANINA
+    # geliyor, çünkü sayı ve tarih okumak dinlemekten kolay.
+    if voice:
+        try:
+            from ses import seslendir_ogg
+
+            konusma = await seslendir_ogg(response_text)
+            if konusma:
+                await send_voice(konusma, chat_id=chat_id)
+        except Exception:
+            log.exception("Sesli cevap gönderilemedi")
 
 
 async def _handle_callback_query(callback_query: Dict[str, Any]):

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from auth import verify_api_key
@@ -36,6 +37,10 @@ class ChatMessage(BaseModel):
     message: str
 
 
+class SeslendirilecekMetin(BaseModel):
+    metin: str
+
+
 def sohbet_kovasi(user: dict) -> str:
     """Konuşma geçmişinin anahtarı — HER ZAMAN sunucuda, giriş yapan kişiden üretilir.
 
@@ -62,6 +67,35 @@ async def chat(data: ChatMessage, user: dict = Depends(verify_api_key)):
 
     response = await route_message(text, sohbet_kovasi(user), user["id"])
     return {"response": response}
+
+
+@router.post("/ses")
+async def chat_ses(
+    data: SeslendirilecekMetin,
+    user: dict = Depends(verify_api_key),
+):
+    """Metni sese çevirip MP3 döner — panelin 🔊 düğmesi bunu çalıyor.
+
+    Tarayıcının kendi `speechSynthesis`'i bedava ve anındaydı ama sesi her
+    cihazda başkaydı. Asistanın sesi kimliğinin parçası; telefon değişince
+    değişmemeli. Bu yüzden panel de Telegram'la AYNI motoru kullanıyor
+    (`ses.seslendir`), tek fark biçim: burada MP3 yeter, tarayıcı onu
+    doğrudan çalıyor; Telegram ise ses notu için OGG istiyor.
+
+    Ses üretilemezse 503 — panel düğmeyi sessizce pasifleştirir, metin durur.
+    """
+    from ses import seslendir
+
+    mp3 = await seslendir(data.metin)
+    if not mp3:
+        raise HTTPException(status_code=503, detail="Seslendirme şu an kullanılamıyor")
+
+    return Response(
+        content=mp3,
+        media_type="audio/mpeg",
+        # Aynı metin iki kez çalınırsa ikinci sefer ağa çıkmasın
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.post("/voice")

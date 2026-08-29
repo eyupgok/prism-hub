@@ -31,6 +31,8 @@ logging_setup.py     → Tek yerden loglama. `print()` KULLANMA — `get_logger(
 groq_client.py       → Groq çağrıları için ortak sarmalayıcı: JSON modu
                        (response_format) + ana model başarısızsa GROQ_FALLBACK_MODEL
                        + **token bütçesi yedeği** → "Akıl yürüten modeller" bölümü
+ses.py               → Metin → ses (edge-tts). Telegram ses notu + panelin
+                       "Dinle" düğmesi ortak kullanır → "Sesli Cevap"
 backup.py            → SQLite backup API ile tutarlı kopya → gzip → Telegram'a dosya
 confirm.py           → Onay bekleyen yıkıcı işlemler (AI ile silme). Bellekte, 5 dk ömürlü.
                        REST/panel silmeleri bu akıştan geçmez — orada kullanıcı zaten
@@ -88,7 +90,8 @@ modules/
   chat/
     service.py  → Groq Whisper transkripsiyon + describe_image() vision analizi
                    (Telegram + REST ortak kullanır)
-    routes.py   → POST /api/chat (metin), /api/chat/voice (ses), /api/chat/image (görsel)
+    routes.py   → POST /api/chat (metin), /api/chat/voice (ses → metin),
+                   /api/chat/image (görsel), /api/chat/ses (metin → ses, MP3)
   reminders/
     models.py   → CREATE TABLE reminders (id, title, due_datetime, priority,
                    is_completed, last_notified_at, snooze_count, recurrence, created_at)
@@ -892,6 +895,72 @@ ingest ve ai_router prompt'larında açıkça yazılı.
 Çift kayıt kontrolü iadeyi orijinal harcamayla eşleştirmez (+273.90 ile −273.90 arası fark
 547.80, eşik 0.005).
 
+## Sesli Cevap
+
+`ses.py` — metni sese çeviren tek yer. İki müşterisi var: Telegram ses notu ve
+panelin baloncuk altındaki **Dinle** düğmesi.
+
+### Ne zaman konuşur
+
+**Kanalı aynalar:** sesli mesaj atana sesli cevap verir, yazana yazar.
+Ayrı bir komut ya da ayar yok.
+
+Sebebi: "Kaydedildi." için ses notu göndermek, dokunup dinlemeyi gerektirdiği
+için düz yazıdan daha yorucu. Ama ona sesle konuşuyorsan ellerin zaten
+meşguldür. Ses metnin YERİNE değil YANINA gidiyor — sayı ve tarih okumak
+dinlemekten kolay.
+
+Panelde ise düğmeye basınca, yani istendiğinde.
+
+### Neden edge-tts
+
+⚠️ **Groq'un seslendirmesi Türkçe bilmiyor** (yalnız İngilizce ve Arapça).
+Whisper (ses → metin) Groq'ta ama tersi başka bir kaynaktan gelmek zorunda.
+
+⚠️ **Yerel model (Piper) bilerek seçilmedi.** Sunucunun 954 MB RAM'i var;
+sentez sırasındaki 200-250 MB'lık sıçrama, bellek daralınca çekirdeğin en
+şişman süreci öldürmesi demek — o da `prism`'in kendisi olurdu. Sesli cevap
+uğruna asistanı kaybetmek kötü bir takas. `edge-tts` ise bir ağ çağrısı:
+bellekte yalnız birkaç on kilobaytlık ses durur, anahtar da hesap da istemiyor.
+
+⚠️ **Kullandığı uç resmî bir API değil** — Edge'in "sesli oku" özelliğinin
+kendi ucu, Microsoft bir gün kapatabilir. Bu yüzden `ses.py`'deki her fonksiyon
+hata yerine **`None` döndürüyor**: ses üretilemezse asistan eskisi gibi yazıyla
+cevap verir. Seslendirme bir ikram, işin kendisi değil.
+
+### Neden panel de sunucudan ses çekiyor
+
+Tarayıcının kendi motoru (`speechSynthesis`) bedava ve anındaydı ama sesi
+**her cihazda başka**: iPhone'da bir ses, Android'de başka. Asistanın sesi
+kimliğinin parçası; telefon değişince değişmemeli. Bu yüzden panel de
+Telegram'la aynı motoru kullanıyor — tek fark biçim.
+
+| | Panel | Telegram |
+|---|---|---|
+| Biçim | MP3 | OGG/Opus |
+| ffmpeg | gerekmez | **gerekir** (`sudo apt install ffmpeg`) |
+
+ffmpeg yoksa `seslendir_ogg()` `None` döner, bir kez log'a yazar ve Telegram
+yalnız metin gönderir. Panel etkilenmez.
+
+### Metin temizliği
+
+Yanıtlar Telegram için HTML taşıyor (`<b>`, `&amp;`) ve emoji içeriyor
+(🔹 ☀️ 🟢). Ham okutulursa "küçüktür b büyüktür" duyulur. `ses.temizle()`
+etiketleri söküyor, varlıkları çözüyor, emojiyi eliyor.
+
+⚠️ Emoji filtresi tek başına **yetmiyor**: "☀️"nin sonundaki görünmez
+varyasyon seçici (U+FE0F) `Mn` kategorisinde, yani simge sayılmıyor ve emojisi
+silinince ortada kalıp okunuşta boşluk bırakıyordu. `Mn`'in tamamını elemek
+Türkçe için gereksiz risk olduğundan yalnız seçici aralığı ayrıca düşürülüyor.
+
+Elenirse ANLAM kaybedenler ise çevriliyor, atılmıyor: `°C` → "derece",
+`₺` → "lira", `&` → "ve", `·` → ",".
+
+Uzun metin sırayla cümle sonundan, olmazsa kelime sonundan kesiliyor —
+`AZAMI_KARAKTER` (1200). Kelime yedeği şart: madde madde yazılmış bir özette
+ilk yarıda hiç nokta olmayabiliyor ve yarım hece okunuyordu.
+
 ## Zamanlayıcı (scheduler.py)
 
 - **Her 1 dakika:** `check_reminders()` → önce `reschedule_overdue_recurring()` ile bildirim
@@ -1006,6 +1075,9 @@ PANEL_PASSWORD           → SADECE İLK KURULUMDA okunur: users tablosu boşken
 PANEL_USER_NAME          → İlk kullanıcının adı (varsayılan: Eyüp). Sadece ilk kurulumda.
 SESSION_SECRET           → Panel oturum biletinin imza anahtarı. Yoksa API_KEY'e düşer
                             (eski davranış). Değişirse açık oturumların hepsi düşer.
+TTS_VOICE                → Asistanın sesi (varsayılan: tr-TR-AhmetNeural).
+                            Kadın ses için tr-TR-EmelNeural. Kod değişmez.
+TTS_MAX_CHARS            → Seslendirilecek azami karakter (varsayılan 1200)
 EXPENSE_DUPLICATE_WINDOW_MINUTES → Aynı tutarlı ikinci bildirimin çift sayılacağı aralık (varsayılan 5)
 WEBHOOK_URL              → Genel HTTPS adresi (Telegram webhook için: https://kendi-alan-adin.example.com)
 PANEL_URL                → Panelin adresi. Yazılmazsa WEBHOOK_URL kullanılır (ikisi aynı

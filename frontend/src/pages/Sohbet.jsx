@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Send, ImagePlus, Sparkles, X } from 'lucide-react'
+import { Send, ImagePlus, Sparkles, X, Volume2, Square } from 'lucide-react'
 import { api } from '../api/client'
 import { useKullanici } from '../kullanici'
 
@@ -58,6 +58,9 @@ function Zengin({ metin }) {
 export default function Sohbet() {
   const { kullanici, saltOkunur } = useKullanici()
   const [mesajlar, setMesajlar] = useState([])
+  // Hangi baloncuk şu an konuşuyor (index) — aynı anda yalnız biri çalar
+  const [calan, setCalan] = useState(null)
+  const sesRef = useRef(null)
   const [girdi, setGirdi] = useState('')
   const [gorsel, setGorsel] = useState(null)
   const [bekliyor, setBekliyor] = useState(false)
@@ -67,6 +70,43 @@ export default function Sohbet() {
   useEffect(() => {
     alt.current?.scrollIntoView({ behavior: 'smooth' })
   }, [mesajlar, bekliyor])
+
+  // Sayfadan çıkarken çalanı sustur. Olmasaydı başka sekmeye geçince ses
+  // arkadan konuşmaya devam ederdi ve durduracak düğme ekranda kalmazdı.
+  useEffect(() => () => sesRef.current?.pause(), [])
+
+  /**
+   * Baloncuğu sesli okut.
+   *
+   * Ses SUNUCUDA üretiliyor (`/api/chat/ses`), tarayıcının kendi
+   * `speechSynthesis`'i ile değil: o bedava ve anında ama sesi her cihazda
+   * başka. Asistanın sesi kimliğinin parçası, telefon değişince değişmemeli —
+   * bu yüzden panel de Telegram'la aynı motoru kullanıyor.
+   */
+  async function seslendir(i, metin) {
+    sesRef.current?.pause()
+    if (calan === i) return setCalan(null)   // aynı düğme: durdur
+
+    setCalan(i)
+    let adres
+    try {
+      adres = await api.seslendir(metin)
+      const ses = new Audio(adres)
+      sesRef.current = ses
+      const bitir = () => {
+        setCalan((s) => (s === i ? null : s))
+        URL.revokeObjectURL(adres)
+      }
+      ses.onended = bitir
+      ses.onerror = bitir
+      await ses.play()
+    } catch {
+      // Seslendirme bir ikram; başarısızlığı sohbete hata baloncuğu olarak
+      // düşürmek gereksiz gürültü olurdu. Düğme eski hâline döner, metin durur.
+      if (adres) URL.revokeObjectURL(adres)
+      setCalan((s) => (s === i ? null : s))
+    }
+  }
 
   async function gonder(e) {
     e?.preventDefault()
@@ -135,6 +175,18 @@ export default function Sohbet() {
               <Zengin metin={m.metin} />
               {m.gorselAdi && (
                 <p className="text-[11px] mt-1 opacity-70">🖼 {m.gorselAdi}</p>
+              )}
+              {m.kim === 'prism' && (
+                <button
+                  type="button"
+                  onClick={() => seslendir(i, m.metin)}
+                  className="mt-1.5 flex items-center gap-1 text-[11px] transition-opacity hover:opacity-100"
+                  style={{ color: 'var(--text-faint)', opacity: calan === i ? 1 : 0.6 }}
+                  aria-label={calan === i ? 'Durdur' : 'Sesli dinle'}
+                >
+                  {calan === i ? <Square size={11} /> : <Volume2 size={11} />}
+                  {calan === i ? 'Durdur' : 'Dinle'}
+                </button>
               )}
             </div>
           </div>
