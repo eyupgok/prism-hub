@@ -344,6 +344,18 @@ def test_ayni_konu_iki_kez_alinmaz(db):
     assert len(takip.acik_takipler(db, SAHIP)) == 1
 
 
+def test_sorulmus_konu_yeniden_alinmaz(db):
+    """Aynı soruyu iki gün arayla ikinci kez sormak dalgınlık göstergesi.
+
+    Bedeli, etiketin `temizle()` onu düşürene kadar kilitli kalması — yanlış
+    bir etiket bu yüzden `takip-unut` ile silinmeli."""
+    t = _takip(db, konu="dişçi randevusu", saat_farki=-1)
+    takip.soruldu(db, t["id"])
+
+    assert takip.acik_takipler(db, SAHIP) == []          # artık açık değil
+    assert _takip(db, konu="dişçi randevusu") is None    # ama yine de engelliyor
+
+
 def test_takip_sinirini_asmaz(db):
     """Her konuşmadan birkaç takip çıkarsa asistan sorgu hâkimi olur."""
     for i in range(AZAMI_ACIK_TAKIP + 3):

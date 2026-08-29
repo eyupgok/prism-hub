@@ -62,6 +62,10 @@ Kullanıcının bahsettiği, yaşanıp bitecek ve **sonucu merak edilir** olayla
 - "Annem hastanede"              → sorulur: durumu nasıl
 
 ## NEYİ ASLA YAZMAZSIN
+- **Adı konmamış olaylar.** Kullanıcı neyin ne olduğunu söylemediyse takip
+  ALMA. "Yarın randevum var" → hangi randevu belli değil, ATLA.
+  "Yarın dişçi randevum var" → alınır. Eksiği kendin tamamlama; elinde
+  olmayanı uydurmaktansa hiç sormamak doğrudur.
 - Sonucu olmayan sıradan işler: "markete gideceğim", "duş alacağım".
 - Kullanıcının kendisinin sormadığı, senin merak ettiğin şeyler.
 - Zaten bekleyenler listesindekiler ya da onların başka kelimelerle yazılmışı.
@@ -74,9 +78,18 @@ Kullanıcının bahsettiği, yaşanıp bitecek ve **sonucu merak edilir** olayla
 günün akşamı (19:00) ya da ertesi sabah. Olayın saati belirsizse o günün
 19:00'unu al. Biçim: "YYYY-MM-DDTHH:MM"
 
-## SORU
-Kısa, doğal, resmî ("siz" kipiyle). "Dişçi nasıl geçti?" gibi.
-Konu ise iki üç kelimelik bir etiket: "dişçi randevusu".
+## KONU VE SORU
+`konu` iki üç kelimelik bir etiket ve olayı TEK BAŞINA tanıtmalı — aylar
+sonra o satırı okuyan biri neyin sorulduğunu anlamalı. `soru` da konuyu
+adıyla anmalı, yoksa kullanıcı hangi olaydan bahsedildiğini bilemez.
+
+Kötü:  konu: "randevu"          soru: "Randevu nasıl geçti?"
+Kötü:  konu: "toplantı"         soru: "Toplantı nasıldı?"
+İyi:   konu: "dişçi randevusu"  soru: "Dişçi nasıl geçti?"
+İyi:   konu: "bitirme sunumu"   soru: "Sunumunuz nasıl geçti?"
+
+Etiketi kullanıcının kendi kelimeleriyle kur. Yeterince belirgin bir etiket
+kuramıyorsan o olayı hiç yazma.
 
 ## ÇIKTI
 Sadece JSON:
@@ -123,6 +136,11 @@ def ekle(
     if an.tzinfo is None:
         an = TZ.localize(an)
 
+    # Sorulmuş takipler de sayılıyor, sadece açık olanlar değil: aynı soruyu
+    # iki gün arayla ikinci kez sormak dalgınlık göstergesi. Bedeli, bir
+    # etiketin `temizle()` onu düşürene kadar (30 gün) kilitli kalması —
+    # yani düzenli tekrar eden bir olay ("aylık kontrol") ikinci kez
+    # alınamaz. Yanlış bir etiket bu yüzden `takip-unut` ile silinmeli.
     if conn.execute(
         "SELECT 1 FROM takipler WHERE owner_id = ? AND konu = ?", (owner_id, konu)
     ).fetchone():

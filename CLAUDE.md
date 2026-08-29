@@ -516,6 +516,19 @@ dalgınlık gösterir.
 ⚠️ **İşaretleme gönderimden SONRA** (`service.tur`): Telegram'a ulaşılamazsa
 soru sorulmamış sayılıp bir sonraki turda yeniden denenmeli.
 
+⚠️ **Adı konmamış olay takip olmaz.** İlk gerçek çıkarım turunda model
+`konu: "randevu"` üretti — çünkü kullanıcının cümlesi de o kadarını
+söylüyordu. Ertesi akşam "Randevu nasıl geçti?" diye sormak ilgi değil
+doldurulmuş form gibi durur. Çözüm modelden "daha belirgin ol" istemek
+DEĞİL (bu onu uydurmaya iter, mimarinin kaçındığı şey); belirgin bir etiket
+kurulamıyorsa olayı hiç yazmamak. Yönergedeki ilk "asla yazmazsın" kuralı bu.
+
+⚠️ `UNIQUE(owner_id, konu)` **sorulmuş takipleri de kapsıyor** — aynı soru iki
+gün arayla tekrarlanmasın diye. Bedeli: etiket `temizle()` onu düşürene kadar
+(30 gün) kilitli, yani düzenli tekrar eden bir olay ikinci kez alınamaz.
+Yanlış bir etiket girdiyse `takip-unut` ile silinmeli, yoksa o kelime bir ay
+boyunca kullanılamaz.
+
 ```bash
 python gozlem.py takip                 # sorulmayı bekleyenler
 python gozlem.py takip-cikar "Eyüp"    # çıkarımı elle çalıştır
