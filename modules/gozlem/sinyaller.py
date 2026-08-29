@@ -418,9 +418,16 @@ def hava_cakismasi(conn, owner_id: int, tahmin: Dict, now: datetime) -> List[Dic
     if not tahmin:
         return []
 
+    # ⚠️ Tekrarlayanlar elenir. "Akşam Vitamini" her gün 21:37'de; yağmurlu her
+    # günde yeniden sinyal üretir ve listeyi kirletir. Üstelik haber değeri de
+    # yok: her gün yapılan bir iş yağmurla onlarca kez çakışmıştır, kullanıcı
+    # o çakışmayı zaten yaşamıştır. Havanın kendisi kaybolmuyor — `hava_uyarisi`
+    # onu görevden bağımsız olarak zaten söylüyor. Burada aranan şey, TEK
+    # SEFERLİK bir planın havayla çakışması: "cuma 14:00 servise bırak".
     yakin = [
         r for r in rem.list_reminders(conn, owner_id, include_completed=False)
-        if now <= rem.parse_dt(r["due_datetime"]) <= now + timedelta(hours=24)
+        if (r["recurrence"] or "none") == "none"
+        and now <= rem.parse_dt(r["due_datetime"]) <= now + timedelta(hours=24)
     ]
 
     bulunan = []

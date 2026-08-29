@@ -376,6 +376,22 @@ def test_hava_cakismasi_disarida_olup_olmadigini_bilmedigini_soyluyor(db):
     assert "Sabah Vitamini" in bulunan[0]["kanit"]
 
 
+def test_tekrarlayan_gorev_havayla_eslestirilmiyor(db):
+    """"Akşam Vitamini" her gün 21:37'de; yağmurlu her günde yeniden sinyal
+    üretip listeyi kirletirdi. Haber değeri de yok — her gün yapılan bir iş
+    yağmurla onlarca kez çakışmıştır. Havanın kendisi `hava_uyarisi` ile
+    yine söyleniyor."""
+    now = _an(saat=12)
+    due = now + timedelta(hours=2)
+    tahmin = _tahmin(due.date(), {due.hour: (61, 18)})
+
+    rem.create_reminder(db, SAHIP, "Akşam Vitamini", due.isoformat(), recurrence="daily")
+    assert sinyaller.hava_cakismasi(db, SAHIP, tahmin, now) == []
+
+    rem.create_reminder(db, SAHIP, "Servise bırak", due.isoformat())
+    assert len(sinyaller.hava_cakismasi(db, SAHIP, tahmin, now)) == 1
+
+
 def test_hava_tahmini_yoksa_sinyal_yok(db):
     """Hava servisi çökerse gözlem turu devam etmeli."""
     now = _an(saat=12)

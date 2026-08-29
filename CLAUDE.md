@@ -407,7 +407,7 @@ isim uyduramaz.
 | `gorev_yigilmasi:<gün>` | Bir güne yığılmış görevler, komşu günler boş | 2 |
 | `gecikmis_gorevler` | Vadesi geçmiş, tamamlanmamış yığın | 2 |
 | `inatci_gorev:<id>` | Çok ertelenmiş / uzun süredir duran tek görev (en fazla 2) | 2 |
-| `hava_cakismasi:<id>` | Yaklaşan görevin saatinde yağış / aşırı sıcak-soğuk | 2 |
+| `hava_cakismasi:<id>` | Yaklaşan **tek seferlik** görevin saatinde yağış / aşırı sıcak-soğuk | 2 |
 | `hava_uyarisi:<gün>` | Görevden bağımsız kayda değer hava (bugün / yarın) | 1–2 |
 | `tamamlama_orani` | Kurma hızı bitirme hızını çok aşıyor | 1 |
 | `ev_halki:<id>` | Diğer kişinin yaklaşan Kritik/Önemli görevi | 1 |
@@ -448,6 +448,7 @@ hakkında konuşmuş olmak ulaşım bütçesi hakkında susmayı gerektirmez.
 |---|---|---|
 | Hava neyin nesi | bir **görevin bağlamı** | **haberin kendisi** |
 | Hatırlatıcı yoksa | hiç çalışmaz | yine çalışır |
+| Tekrarlayan görev | **elenir** | ilgisiz |
 | Yağış eşiği | `YAGIS_KODU` (51, çisenti) | `HAVA_UYARI_YAGIS_KODU` (61, düzgün yağmur) |
 | Anahtar | `hava_cakismasi:<görev id>` | `hava_uyarisi:<YYYY-MM-DD>` |
 
@@ -457,6 +458,13 @@ her gün konuşmak demektir. Yarının havası `HAVA_YARIN_SAATI`'nden (15:00)
 önce konu edilmiyor — sabah özeti bugünü zaten veriyor, yarın ise akşama
 doğru planlanan bir şey. Saatlik tahmin turda **bir kez** çekilip
 (`hava_tahmini()`) iki üreticiye de veriliyor.
+
+⚠️ **Tekrarlayan görevler `hava_cakismasi`'nda elenir.** "Akşam Vitamini"
+her gün 21:37'de; yağmurlu her günde yeniden sinyal üretip listeyi kirletirdi.
+Haber değeri de yok: her gün yapılan bir iş yağmurla onlarca kez çakışmıştır,
+kullanıcı o çakışmayı zaten yaşamıştır. Havanın kendisi kaybolmuyor —
+`hava_uyarisi` onu görevden bağımsız söylüyor. Burada aranan şey **tek
+seferlik** bir planın havayla çakışması: "cuma 14:00 servise bırak".
 
 ⚠️ **Kod, görevin dışarıda olup olmadığını bilemez.** Hatırlatıcının metninde
 yazmıyor ve "Sabah Vitamini" ile "koşuya çık" arasındaki farkı anlamak bir
