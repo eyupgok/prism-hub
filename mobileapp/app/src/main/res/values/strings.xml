@@ -1,3 +1,6 @@
 <resources>
-    <string name="app_name">PRISM</string>
+    <!-- Panel de ana ekranda "PRISM" diye duruyor (PWA). İkisi aynı adı
+         taşıyınca hangisinin ne olduğu karışıyordu; bu ad bildirim erişimi
+         ayarlarında da göründüğü için ayırt edilebilir olması işe yarıyor. -->
+    <string name="app_name">PRISM Köprü</string>
 </resources>

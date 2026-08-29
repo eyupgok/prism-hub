@@ -75,7 +75,16 @@ fun SettingsScreen(store: SettingsStore) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ScreenHeader("Ayarlar", "Sunucu bağlantısı")
+        ScreenHeader("PRISM Köprü", "Banka bildirimlerini sunucuya taşır")
+
+        Text(
+            "Bu uygulamanın açık kalmasına ya da açılmasına gerek yok. Tek işi " +
+                "banka bildirimlerini yakalayıp sunucuya iletmek; bunu arka planda " +
+                "yapıyor. Hatırlatıcı, not, harcama ve sohbet için web panelini " +
+                "kullanın — ana ekrandaki PRISM simgesi.",
+            color = PrismTextMuted,
+            fontSize = 13.sp,
+        )
 
         Column(
             modifier = Modifier
@@ -160,11 +169,13 @@ fun SettingsScreen(store: SettingsStore) {
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
-            LabeledRow("Uygulama", "PRISM Mobil v1.0")
-            LabeledRow("Backend", "FastAPI + Groq + SQLite")
-            LabeledRow("AI", "llama-3.3-70b + Whisper + Vision")
+            LabeledRow("Uygulama", "PRISM Köprü v2.0")
+            LabeledRow("Rolü", "Yalnız bildirim yakalama")
+            LabeledRow("Geri kalanı", "Web paneli")
             Text(
-                "Sunucu URL ve API anahtarı yalnızca bu cihazda saklanır (DataStore).",
+                "Bildirim okumak web'de mümkün değil (sistem yetkisi gerekiyor); " +
+                    "bu uygulama sadece onun için duruyor.\n\n" +
+                    "Sunucu URL ve API anahtarı yalnızca bu cihazda saklanır (DataStore).",
                 color = PrismTextFaint,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 10.dp),

@@ -176,8 +176,16 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
                      → Render hatasında beyaz ekran yerine sebebi gösterir
                        (React'te hata sınırı yalnızca sınıf bileşeniyle yazılabiliyor)
   public/manifest.webmanifest + icon-*.png
-                     → Ana ekrana eklenince uygulama gibi açılır (PWA). iPhone'da
-                       Android uygulaması kurulamadığı için "onun uygulaması" bu.
+                     → Ana ekrana eklenince uygulama gibi açılır (PWA).
+                       **İKİSİNİN DE asıl uygulaması bu** — Android tarafındaki
+                       ekranlar buraya devredildi (bkz. "Android: sensör
+                       uygulaması"). Chrome, manifest + iki boyutta simge +
+                       HTTPS'i görünce kurmayı teklif ediyor ve arka planda
+                       küçük bir APK üretip kuruyor (WebAPK); iOS'ta teklif
+                       çıkmaz, Paylaş → Ana Ekrana Ekle gerekir (`apple-*`
+                       meta etiketleri onun karşılığı).
+                       Service worker YOK: çevrimdışı açılmaz, bildirim
+                       gönderemez. Hatırlatıcılar bu yüzden Telegram'dan.
                        index.html'de `viewport-fit=cover` ŞART — alt gezinmedeki
                        env(safe-area-inset-bottom) ancak onunla çalışıyor.
 
@@ -196,7 +204,9 @@ ozel-sayfa/         → Korumalı, kişiye özel içerik sayfası.
                        ⚠️ iOS'ta yan taraftaki SESSİZ DÜĞMESİ açıksa müzik hiç
                        çalmaz (Web Audio o anahtara bağlı) — ses tuşuyla ilgisi yok.
 
-mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
+mobileapp/           → "PRISM Köprü" — SENSÖR uygulaması (Compose, minSdk 26).
+                       Tek işi banka bildirimlerini yakalayıp sunucuya iletmek.
+                       Gündelik kullanımda AÇILMAZ → "Android: sensör uygulaması"
   data/SettingsStore.kt      → sunucu URL + API anahtarı + yakalama ayarları (DataStore)
   data/InstalledApps.kt      → kurulu uygulama listesi (banka olanlar başta sıralanır)
   data/PendingQueue.kt       → çevrimdışıyken biriken bildirimler (JSON dosya, filesDir)
@@ -215,11 +225,50 @@ mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
                              → WorkManager: yarım saatte bir dinleyici bağlı mı diye
                                bakar, değilse requestRebind(). Süreç öldürüldüğünde
                                onu geri doğuran mekanizma bu
-  ui/screens/                → Chat, Reminders, Notes, Expenses, Settings
-                               (+ ExpenseCaptureSection: izin + uygulama seçici +
-                                dinleyici durum kartı)
-  MainActivity.kt            → alt gezinme + sekme yönetimi
+  ui/screens/SettingsScreen.kt
+                             → uygulamanın TEK ekranı: sunucu adresi + anahtar,
+                               yakalama bölümü, "Hakkında"
+  ui/screens/ExpenseCaptureSection.kt
+                             → izin + uygulama seçici + dinleyici durum kartı.
+                               Uygulamanın asıl yüzü burası
+  MainActivity.kt            → tek ekran; açılışta kuyruk gönderimi, dinleyici
+                               yeniden bağlama ve bekçi kurulumu
 ```
+
+### Android: sensör uygulaması
+
+Uygulamanın Chat / Reminders / Notes / Expenses ekranları **silindi** (1.497
+satır, kodun %42'si). Sebebi basit: web paneli hepsini daha iyi yapıyor ve
+telefonda ana ekrana eklenince zaten uygulama gibi açılıyor (PWA).
+
+Peki uygulama neden hâlâ duruyor? **Bildirim okumak web'de mümkün değil.**
+`NotificationListenerService` bir Android sistem yetkisi; yalnız kurulu bir
+uygulamaya verilebiliyor ve kullanıcının Ayarlar'dan tek tek onaylaması
+gerekiyor. Tarayıcı bildirim *gösterebiliyor* ama başkasının bildirimini
+*okuyamıyor* — ikisi ayrı şey. Otomatik harcama yakalama bu yüzden yerli
+koda mahkûm.
+
+Sonuçta iş bölümü şöyle:
+
+| | Web paneli (PWA) | PRISM Köprü (Android) |
+|---|---|---|
+| Ne yapar | bakılan, yazılan her şey | banka bildirimlerini iletir |
+| Ne sıklıkla açılır | sürekli | kurulumdan sonra hiç |
+| Kimde var | ikisinde de | yalnız Eyüp'te (iOS'ta karşılığı yok) |
+
+⚠️ **Uygulamanın adı `PRISM Köprü`** (`strings.xml`). Panel de ana ekranda
+"PRISM" diye duruyor; ikisi aynı adı taşıyınca hangisinin ne olduğu
+karışıyordu. Bu ad bildirim erişimi ayarları listesinde de görünüyor.
+
+⚠️ `data/api/` yalnız **iki uç** tanıyor: `health` (bağlantı testi) ve
+`expenses/ingest`. Hatırlatıcı/not/harcama uçları ve modelleri kaldırıldı.
+Uygulamaya yeni bir özellik eklemek isteyince önce şunu sor: **bu iş panelde
+yapılamaz mı?** Yapılabiliyorsa oraya gitmeli — bu uygulamanın büyümemesi
+bilinçli bir karar.
+
+⚠️ `IngestResult.expense` **silinemez**: yakalama kaydındaki "273.90 ₺ · yemek"
+satırını o besliyor. Sunucu tam kaydı döndürüyor, uygulama `CapturedExpense`
+ile yalnız iki alanını okuyor (Gson bilmediği alanları atlıyor).
 
 ## Veritabanı Tabloları
 
