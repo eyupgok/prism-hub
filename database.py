@@ -73,6 +73,7 @@ def init_db():
     from modules.reminders.models import create_reminders_table
     from modules.notes.models import create_notes_table
     from modules.expenses.models import create_expenses_table, create_budgets_table
+    from modules.gozlem.models import create_gozlem_tables
 
     with get_db() as conn:
         # Önce kullanıcılar: veri tablolarının owner_id göçü buradaki id'ye atıyor.
@@ -81,6 +82,7 @@ def init_db():
         create_notes_table(conn)
         create_expenses_table(conn)
         create_budgets_table(conn)
+        create_gozlem_tables(conn)
         # conversations'a owner_id EKLENMİYOR — bilerek. Bu tablo yalnızca
         # get_recent_messages() tarafından, yalnızca Groq'a bağlam vermek için
         # okunuyor ve zaten chat_id'ye göre süzülüyor. İki kişinin chat_id'si

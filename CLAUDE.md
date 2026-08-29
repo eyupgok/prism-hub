@@ -55,6 +55,12 @@ tanitim.py           → Telegram'dan arka arkaya mesaj yollayıp paneli açmaya
                        `--kime "<ad>"` gönderir ve önce onay sorar.
                        ⚠️ Gönderilen mesaj geri alınamaz — sıra: --liste, kendine
                        prova, sonra gerçeği.
+gozlem.py            → Gözlem katmanının denetim aracı: asistanın hafızası
+                       (`bilgi` / `ekle` / `unut` / `cikar`), kendiliğinden
+                       konuşma kararları (`sinyal` / `tur` / `gunluk`) ve
+                       kişi başına günlük mesaj sınırı (`seviye`).
+                       `tur` varsayılan olarak GÖNDERMEZ — `--gercek` gerekir.
+                       Panelde karşılığı YOK, bilerek → "Gözlem Katmanı".
 gecmis.py            → Konuşma geçmişini okur (--kisi / --son / --ara / --ham).
                        Asistan satırındaki ham JSON'u "modül.aksiyon (parametreler)"
                        diye özetler; chat yanıtlarında metnin kendisini basar.
@@ -105,6 +111,14 @@ modules/
   summary/
     service.py  → Hava + görevler + harcama + notlar birleştirme
     routes.py
+  gozlem/       → ASİSTANIN İKİNCİ DÖNGÜSÜ (ayrıntı → "Gözlem Katmanı")
+    models.py   → hafiza + gozlem_gunlugu + gozlem_durum tabloları
+                   + users.gozlem_sinir göçü (DEFAULT 0 = herkes kapalı)
+    sinyaller.py→ Deterministik sinyal üretimi (SQL + aritmetik). Modelin
+                   uydurabileceği hiçbir şey yok; eşikler dosyanın başında.
+    hafiza.py   → Konuşmalardan kalıcı bilgi çıkarımı + yönergeye enjeksiyon
+    service.py  → Gözlem turu: sinyal topla → susma bütçesi → modele sor →
+                   gönder → kararı (SUSTUĞU turlar dahil) günlüğe yaz
   ozel/
     routes.py   → GET /api/ozel/özel sayfa — `ozel-sayfa/index.html`'i servis eder.
                    Statik `dist/`e KONMADI bilerek: orayı Caddy korumasız
@@ -203,7 +217,11 @@ mobileapp/           → Android uygulaması (Jetpack Compose, minSdk 26)
 
 ```sql
 users        (id, ad, hitap, telegram_chat_id UNIQUE, parola_hash, created_at,
-              sehir, enlem, boylam, konum_at)
+              sehir, enlem, boylam, konum_at, gozlem_sinir)
+              → gozlem_sinir = günde en fazla kaç KENDİLİĞİNDEN mesaj.
+                **DEFAULT 0 (kapalı)** — kendiliğinden konuşma, asistanın
+                istenmemiş bir mesaj gönderebildiği tek mekanizma; açılması
+                ayrı bir komuta bağlı: `gozlem.py seviye "<ad>" 3`
               → hitap = "Bey" / "Hanım", NULL olabilir. Asistanın seslenme
                 biçimi; addan ÇIKARILMAZ (bkz. "Asistanın Üslubu").
                 Göç: _migrate_hitap(), idempotent ALTER TABLE
@@ -234,6 +252,21 @@ expenses     (owner_id, id, amount ← NEGATİF = İADE, category[yemek|ulaşım
 
 budgets      (owner_id, id, category, monthly_limit, created_at)
               → UNIQUE artık (owner_id, category) — ikisi de "yemek" limiti koyabilsin
+
+hafiza       (owner_id, id, icerik, tur[alışkanlık|tercih|durum|ilişki|olgu],
+              kaynak[konuşma|elle], gecerlilik, created_at, son_teyit_at)
+              → Asistanın kişi hakkında biriktirdiği KALICI bilgiler. Veritabanında
+                zaten olan şeyler (randevu, harcama) buraya YAZILMAZ — gün geçince
+                yalan olurlar. Geçici olanlar `gecerlilik` tarihiyle girer.
+              → UNIQUE(owner_id, icerik). Panelde görünmez; `gozlem.py bilgi`.
+
+gozlem_gunlugu (owner_id, id, karar[konustu|sustu], anahtar, mesaj, sebep,
+              sinyaller, created_at)
+              → Her gözlem turunun kararı. SUSTUĞU turlar da yazılır — eşikleri
+                ayarlamanın tek yolu o satırlar (`gozlem.py gunluk`).
+
+gozlem_durum (owner_id, son_hafiza_conv_id)
+              → Hafıza çıkarımı `conversations` tablosunda nereye kadar geldi
 
 conversations (id, chat_id, role[user|assistant], content, created_at)
               → INDEX: idx_conv_chat(chat_id)
@@ -306,6 +339,7 @@ ikiye bölünür:
 |---|---|
 | Modelin ürettiği sohbet | `SYSTEM_PROMPT` (yalnız `chat.respond` metinleri) |
 | **Sabit onay/özet metinleri** | `ai_router.dispatch()`, `telegram_bot.py`, `modules/summary/service.py` |
+| Kendiliğinden gelen mesajlar | `modules/gozlem/service.py` → `YONERGE` |
 
 İkincisi kullanıcının gördüğünün çoğu ve modelden GEÇMİYOR. Yeni bir yanıt
 metni eklerken "sen" kipine kaymamak gerekiyor; `tests/test_uslup.py` bilinen
@@ -325,6 +359,129 @@ python kullanici.py hitap "Eyüp"            # temizler
 
 Boş bırakılırsa cinsiyetten bağımsız **"efendim"** kullanılır — yani hiç
 doldurulmasa da üslup bozulmaz, sadece adla seslenmez.
+
+## Gözlem Katmanı
+
+Asistanın **ikinci döngüsü**. Bu katmandan önce PRISM'in gönderdiği her mesajın
+sebebi ya kullanıcının bir cümlesiydi ya da bir saat (08:00 özeti, hatırlatıcı
+alarmı). Üçüncü bir sebep yoktu: **fark ettiği için** konuşmak. Bir uşağı komut
+yorumlayıcısından ayıran şey tam olarak o üçüncü sebep.
+
+### Temel kural: sinyalleri kod bulur
+
+    Sinyalleri KOD bulur (SQL + aritmetik, `sinyaller.py`).
+    Model yalnızca "bu söylenmeye değer mi ve nasıl söylenir" sorusunu cevaplar.
+
+Sebebi: kendiliğinden gelen bir mesajdaki uydurma bilgi, sorulunca gelendekinden
+çok daha zararlı — kullanıcı onu beklemiyordu, bağlamı yok, doğruluğunu kontrol
+etmek için sebebi yok. Bir kere "bunu uydurdun" dedirtirse kendiliğinden konuşma
+hakkı biter. Model elinde yalnız `kanit` metinleriyle cümle kurar; sayı, tarih,
+isim uyduramaz.
+
+### Sinyaller (`modules/gozlem/sinyaller.py`)
+
+| Anahtar | Ne yakalar | Ağırlık |
+|---|---|---|
+| `harcama_sessizligi` | Telefondaki dinleyici ölmüş (otomatik kayıt akışı kesildi) | 3 |
+| `butce_asildi:<kat>` | Aylık limit geçildi | 3 |
+| `butce_hizi:<kat>` | Harcama oranı ayın geçen oranını çok aşıyor | 2 |
+| `olagandisi_harcama:<gün>` | Bugün, son 14 günün ortalamasının katı | 2 |
+| `gorev_yigilmasi:<gün>` | Bir güne yığılmış görevler, komşu günler boş | 2 |
+| `gecikmis_gorevler` | Vadesi geçmiş, tamamlanmamış yığın | 2 |
+| `inatci_gorev:<id>` | Çok ertelenmiş / uzun süredir duran tek görev (en fazla 2) | 2 |
+| `hava_cakismasi:<id>` | Yaklaşan görevin saatinde yağış / aşırı sıcak-soğuk | 2 |
+| `tamamlama_orani` | Kurma hızı bitirme hızını çok aşıyor | 1 |
+| `ev_halki:<id>` | Diğer kişinin yaklaşan Kritik/Önemli görevi | 1 |
+
+⚠️ `anahtar` **konu kimliği**: aynı anahtar `KONU_BEKLEME_GUNU` (3 gün) tekrar
+seçilemiyor. Bu yüzden anahtar sabit olmalı — `gecikmis_gorevler` bilerek sayı
+içermiyor; içerseydi sayı her değiştiğinde "yeni konu" sanılıp aynı şey her gün
+söylenirdi. Kategoriye/kayda özel olanlar ise bilerek ayrı: yemek bütçesi
+hakkında konuşmuş olmak ulaşım bütçesi hakkında susmayı gerektirmez.
+
+### Susma bütçesi (`modules/gozlem/service.py`)
+
+Sırayla uygulanıyor, **model çağrısı en sonda** — turların çoğu Groq'a hiç
+uğramadan biter:
+
+1. `users.gozlem_sinir` sıfır mı → çık
+2. Sessiz saat mi (23:00–08:00) → sus
+3. Günlük sınır doldu mu → sus
+4. Son mesajdan `ASGARI_ARA_DAKIKA` (180) geçti mi → geçmediyse sus
+5. Sinyal var mı → yoksa sus
+6. Bu konular son 3 günde konuşuldu mu → konuşulduysa sus
+7. Modele sor: değer mi → değmezse sus
+8. Konuş
+
+Tek gerçek tasarım riski **gürültü**: çok konuşan asistan susturulur, susturulan
+asistan ölür. O yüzden susmak varsayılan, konuşmak istisna. `tests/test_gozlem.py`
+testlerinin çoğu asistanın konuşMAdığını doğruluyor.
+
+⚠️ **Kuru çalıştırma (`gozlem.py tur`) hiçbir bütçe engeline takılmaz** ama
+engelleri `uyari` olarak raporlar. Gece yarısı ya da sınır dolmuşken de "ne
+derdi" görülebilmeli; ama denemenin gerçekte gönderileceği anlamına gelmediği
+de görünmeli.
+
+Model çağrısına giden mesaj Telegram'a `html.escape()` ile gidiyor — modelden
+düz metin isteniyor ama garanti değil, kaçırılmış bir `<` mesajı 400 ile
+sessizce yutardı.
+
+### Hafıza (`modules/gozlem/hafiza.py`)
+
+Konuşmalardan kalıcı bilgiler süzülüp `hafiza` tablosuna yazılıyor ve her
+mesajda `ai_router` yönergesine ekleniyor. Öncesinde asistanın tüm "hafızası"
+son 10 mesajdı (`HISTORY_LIMIT`), üstelik `conversations` 30 günde bir
+temizleniyor — yani PRISM kullanıcıyı her sabah yeniden tanıyordu.
+
+⚠️ **Hafıza veritabanının kopyası değil.** "Yarın 14:00'te dişçi" bir bilgi
+DEĞİL — o zaten `reminders` tablosunda; hafızaya yazılırsa randevu geçtikten
+sonra orada yalan olarak kalır. Hafıza yalnız hiçbir tabloya yazılmayan şeyler
+için: alışkanlık, tercih, süregelen durum, ilişki. Geçici olanlar `gecerlilik`
+tarihiyle girip süresi dolunca siliniyor.
+
+Çıkarım mesajın içinde değil ayrı bir turda (3 saatte bir): her mesaja fazladan
+bir Groq çağrısı eklemek cevap süresini iki katına çıkarırdı. Yeni konuşma
+satırı yoksa model hiç çağrılmıyor.
+
+**Panelde yok, bilerek.** Kişi hakkında çıkarım içeriyor; görülmesi ve
+düzeltilebilmesi şart ama gündelik arayüzde durması gerekmiyor:
+
+```bash
+python gozlem.py bilgi                       # kim hakkında ne biliyor
+python gozlem.py unut 12                     # yanlış bir bilgiyi sil
+python gozlem.py ekle "Eyüp" "..." --tur tercih
+```
+
+### İtiraz
+
+İyi bir asistan her dediğini sorgusuz yapan değil. İki yerden geliyor:
+
+| Nereden | Ne yapar |
+|---|---|
+| `ai_router._itiraz()` | Hatırlatıcı kurulunca çakışma (±30 dk) ve gün yığılması (5+) tespiti |
+| `SYSTEM_PROMPT` → "İTİRAZ HAKKIN" | Sohbet yanıtlarında gerekçeli itiraz |
+
+Çakışma tespiti bilerek **modelde değil kodda**: aritmetik bir iş, modele
+bırakılırsa bazen görür bazen görmez — güvenilmez bir uyarı hiç uyarmamaktan
+kötüdür. Ayrıca komut yanıtlarını `dispatch` kuruyor, modelin oraya yorum
+iliştirme imkânı yok.
+
+⚠️ İtiraz **işi engellemez**. Hatırlatıcı her hâlükârda kurulur, itiraz sadece
+altına eklenen bir not. Kullanıcı ne istediğini biliyor olabilir.
+
+### Ayarlama
+
+```bash
+python gozlem.py sinyal "Eyüp"        # şu an ne fark ediyor (hiçbir şey göndermez)
+python gozlem.py tur "Eyüp"           # tam tur — ne derdi? (GÖNDERMEZ)
+python gozlem.py tur "Eyüp" --gercek  # gerçekten gönder (onay sorar)
+python gozlem.py gunluk               # konuştuğu VE sustuğu turlar
+python gozlem.py seviye "Eyüp" 3      # günde en fazla 3 · 0 = kapalı
+```
+
+Eşikler `modules/gozlem/sinyaller.py` ve `service.py` başlarında toplu duruyor.
+`gunluk` çıktısındaki "sustu" satırları olmadan hangi eşiğin yanlış olduğunu
+anlamanın yolu yok.
 
 ## AI Routing Sistemi
 
@@ -549,6 +706,15 @@ ingest ve ai_router prompt'larında açıkça yazılı.
   günün harcaması (iade sayısı dahil), yarının görevleri. `/aksam` ile elle çağrılır.
 - **Her pazar 20:00:** `send_weekly_report()` → tamamlanan görev sayısı, haftalık harcama,
   geçen haftayla kıyas, günlük dağılım (metin çubuğu), kategori kırılımı. `/hafta` ile elle çağrılır.
+- **09:00–21:00 arası iki saatte bir (dakika 15):** `gozlem_turu()` → asistanın
+  kendi başına "söylenecek bir şey var mı" diye baktığı tur. Turların çoğu
+  sessizce biter; ayrıntı → "Gözlem Katmanı". `users.gozlem_sinir` sıfır olan
+  kişi atlanır (varsayılan sıfır — yani bu iş hiç kimseye kendiliğinden mesaj
+  yollamadan yayına giriyor). Dakika 15 bilerek: :00'da özetler ve dakikalık
+  hatırlatıcı işi dönüyor, iki bildirimin üst üste düşmesi istenmiyor.
+- **Her 3 saatte bir (dakika 40):** `hafiza_cikarimi()` → yeni konuşmalardan
+  kalıcı bilgileri süzüp `hafiza` tablosuna yazar. Yeni satır yoksa Groq'a
+  hiç uğramaz.
 - **Her gece 04:00:** `nightly_backup()` → `backup.py` SQLite backup API ile tutarlı kopya alır,
   gzip'ler, Telegram'a dosya olarak gönderir. `/yedek` komutuyla elle de tetiklenir.
   Sunucu tamamen kaybolsa bile yedek Telegram sohbetinde durur.
@@ -562,9 +728,14 @@ pytest
 
 `tests/` — harcama doğrulaması ve iadeler, çift kayıt tespiti, hatırlatıcı öteleme/erteleme
 mantığı, yedeğin geri yüklenebilirliği, **sahiplik kuralları** (`test_sahiplik.py`:
-başkasının kaydını değiştirme denemesi 403, okuma serbest) ve **konum/hava durumu**
-(`test_konum.py`). Her test geçici veritabanı kullanır (`conftest.py`), gerçek
-`prism.db`'ye dokunulmaz.
+başkasının kaydını değiştirme denemesi 403, okuma serbest), **konum/hava durumu**
+(`test_konum.py`) ve **gözlem katmanı** (`test_gozlem.py`). Her test geçici
+veritabanı kullanır (`conftest.py`), gerçek `prism.db`'ye dokunulmaz.
+
+⚠️ `conftest.py`'deki `db` fikstürü işlemi test bitene kadar **commit etmiyor**.
+Kendi bağlantısını açan bir şeyi test ediyorsan (`service.tur()`, `auth.*`,
+rota testleri) yazmalardan sonra `db.commit()` gerekiyor — yoksa öbür bağlantı
+boş bir veritabanı görür ve hata "yok" gibi değil "davranış yanlış" gibi görünür.
 
 ## Hatırlatıcı Bildirim Planı
 
@@ -713,6 +884,21 @@ O numara `chat-id` komutuna verilir; kişi tekrar `/start` yazdığında artık 
 
 ⚠️ Bu araç veritabanını doğrudan açar. Servis çalışırken de güvenli (SQLite WAL),
 ama parola değişikliği **açık oturumları düşürmez** — çerez süresi dolana kadar geçerli.
+
+### Kendiliğinden konuşmayı açmak
+
+Gözlem katmanı yayına **kapalı** giriyor (`users.gozlem_sinir` DEFAULT 0), yani
+kod sunucuya çıktığında kimseye sürpriz bildirim gitmez. Açmadan önce denemek:
+
+```bash
+cd ~/prism && source venv/bin/activate
+python gozlem.py sinyal "Eyüp"          # şu an ne fark ediyor
+python gozlem.py tur "Eyüp"             # ne derdi? (GÖNDERMEZ)
+python gozlem.py seviye "Eyüp" 3        # günde en fazla 3 mesaj
+```
+
+Birkaç gün sonra `python gozlem.py gunluk` ile hangi turda ne olduğuna bak;
+çok/az konuşuyorsa eşikler `modules/gozlem/` içinde.
 
 ### Konuşma geçmişine bakmak
 

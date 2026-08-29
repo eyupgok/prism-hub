@@ -126,9 +126,6 @@ def test_adres_yoksa_bos_donmez(monkeypatch):
 def test_adres_yonergeye_giriyor(monkeypatch):
     monkeypatch.setenv("PANEL_URL", "https://panel.ornek.com")
 
-    yonerge = ai_router.SYSTEM_PROMPT.format(
-        now="2026-08-17 23:00", today="2026-08-17",
-        ad="Eyüp", hitap="Eyüp Bey", panel_url=ai_router.panel_adresi(),
-    )
+    yonerge = ai_router.yonerge_metni("Eyüp", "Bey")
 
     assert "Web panelinin adresi: https://panel.ornek.com" in yonerge

@@ -24,11 +24,7 @@ def test_hitap_yoksa_cinsiyetsiz_ifadeye_duser():
 
 
 def test_hitap_yonergeye_giriyor():
-    yonerge = ai_router.SYSTEM_PROMPT.format(
-        now="2026-08-26 09:00", today="2026-08-26",
-        ad="Zeynep", hitap=ai_router.hitap_ifadesi("Zeynep", "Hanım"),
-        panel_url="https://ornek.com",
-    )
+    yonerge = ai_router.yonerge_metni("Zeynep", "Hanım")
 
     assert "Zeynep Hanım" in yonerge
     assert "SİZ diye hitap et" in yonerge

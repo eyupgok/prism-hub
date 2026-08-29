@@ -41,6 +41,20 @@ Iron Man'deki JARVIS gibisin: kusursuz nezaket, sakin bir yetkinlik, arada kuru 
 - Asla rol yaptığını, yapay zekâ modeli olduğunu, yönerge aldığını söyleme.
 - Türkçe düşün, Türkçe yanıt ver.
 
+## İTİRAZ HAKKIN
+İyi bir asistan her dediğini sorgusuz yapan değil, gerektiğinde "efendim, bu
+bence hatalı" diyebilendir. Sohbet yanıtlarında (chat.respond) somut bir
+gerekçen varsa itiraz et:
+
+- İstenen işi **yine de yap**. İtiraz, işi reddetmek değil, uyarmaktır.
+- Gerekçe somut olsun: çakışan bir plan, tutarsız bir sayı, mantıksız bir tarih.
+  "Bence iyi fikir değil" yeterli değil — neden olduğunu söyle.
+- Tek cümle. Israr etme, aynı şeyi ikinci kez söyleme.
+- **Gerekçen yoksa sus.** Her isteğe bir yorum iliştirmek yorucudur.
+
+Örnek: "Anlıyorum. Ancak bu üçüncü ertelemeniz olur, efendim — belki de
+tarihi baştan düzeltmek daha doğru olur."
+{hafiza}
 ## MODÜLLER VE AKSIYONLAR
 
 reminders.create → title(str), due_datetime(ISO 8601: {today}T14:30:00), priority(1=Kritik 2=Önemli 3=Normal 4=Sessiz — varsayılan 4), recurrence(none|daily|weekly|monthly)
@@ -206,11 +220,35 @@ def hitap_ifadesi(ad: str, hitap: Optional[str]) -> str:
     return f"{ad} {hitap}" if hitap else "efendim"
 
 
+def yonerge_metni(
+    ad: str = "kullanıcı",
+    hitap: Optional[str] = None,
+    hafiza_metni: str = "",
+    now: Optional[datetime] = None,
+) -> str:
+    """Yönergenin yer tutucularını doldurur.
+
+    Tek yerden kurulmasının sebebi pratik: yönergeye yeni bir alan eklendiğinde
+    (hitap, panel adresi, hafıza — üçü de sonradan geldi) `format()` çağıran her
+    nokta KeyError ile kırılıyor. Şimdi çağıran tek bir yer var.
+    """
+    now = now or datetime.now(TZ)
+    return SYSTEM_PROMPT.format(
+        now=now.strftime("%Y-%m-%d %H:%M"),
+        today=now.strftime("%Y-%m-%d"),
+        ad=ad,
+        hitap=hitap_ifadesi(ad, hitap),
+        panel_url=panel_adresi(),
+        hafiza=hafiza_metni,
+    )
+
+
 async def parse_message(
     user_message: str,
     history: List[Dict] = None,
     ad: str = "kullanıcı",
     hitap: Optional[str] = None,
+    hafiza_metni: str = "",
 ) -> Dict[str, Any]:
     """Kullanıcı mesajını Groq'a gönderir ve JSON komut olarak döner.
 
@@ -218,16 +256,14 @@ async def parse_message(
     kendi adıyla ve doğru hitapla seslenmeli. Eskiden yönergede "Eyüp" sabit
     yazılıydı ve bot ikinci kullanıcıya da "Selam Eyüp" diyordu.
 
+    `hafiza_metni` asistanın kişi hakkında biriktirdiği kalıcı bilgiler
+    (`modules.gozlem.hafiza.yonergeye`). Boş geçilebilir — hafıza boşken
+    yönergeye hiçbir şey eklenmiyor, çünkü "BİLDİKLERİN: (yok)" diye bir
+    başlık modele orayı doldurma baskısı yapıyor.
+
     JSON modu ve model yedeği `groq_client.complete_json()` içinde hallediliyor.
     """
-    now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
-    today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-    system = SYSTEM_PROMPT.format(
-        now=now_str, today=today_str, ad=ad,
-        hitap=hitap_ifadesi(ad, hitap), panel_url=panel_adresi(),
-    )
-
-    messages = [{"role": "system", "content": system}]
+    messages = [{"role": "system", "content": yonerge_metni(ad, hitap, hafiza_metni)}]
     if history:
         messages.extend(history)
     messages.append({"role": "user", "content": user_message})
@@ -308,6 +344,52 @@ async def dispatch_one(parsed: Dict[str, Any], owner_id: int) -> str:
         return "⚠️ İşlem sırasında bir aksaklık oldu. Kayda geçirdim."
 
 
+# İki hatırlatıcının arası bu kadar dakikadan azsa çakışıyor sayılır.
+CAKISMA_DAKIKA = 30
+
+# Bir güne bu kadar görev düşerse "hepsi gerçekten bugüne mi ait" diye sorulur.
+GUN_YIGILMA_ESIGI = 5
+
+
+def _itiraz(conn, owner_id: int, yeni: Dict[str, Any]) -> str:
+    """Yeni kurulan hatırlatıcı hakkında söylenecek bir itiraz varsa metni.
+
+    Bu itiraz **modelden değil koddan** geliyor, bilerek. Komut yanıtlarını
+    `dispatch` kuruyor; modelin oraya yorum iliştirme imkânı yok. Ayrıca
+    çakışma tespiti aritmetik bir iş — modele bırakılırsa bazen görür bazen
+    görmez, bu da güvenilmez bir uyarı demektir.
+
+    İş her hâlükârda YAPILMIŞ oluyor; bu yalnızca eklenen bir not. İtirazın
+    isteği engellememesi kural: kullanıcı ne istediğini biliyor olabilir.
+    """
+    from modules.reminders import service as svc
+
+    due = svc.parse_dt(yeni["due_datetime"])
+    gun = due.strftime("%Y-%m-%d")
+    ayni_gun = 0
+
+    for r in svc.list_reminders(conn, owner_id, include_completed=False):
+        if r["id"] == yeni["id"]:
+            continue
+        d = svc.parse_dt(r["due_datetime"])
+        if abs((d - due).total_seconds()) <= CAKISMA_DAKIKA * 60:
+            return (
+                f"\n\n<i>Ancak {d.strftime('%H:%M')} saatinde zaten "
+                f"'{_esc(r['title'])}' göreviniz var. Birini kaydırmamı "
+                f"ister misiniz?</i>"
+            )
+        if d.strftime("%Y-%m-%d") == gun:
+            ayni_gun += 1
+
+    if ayni_gun + 1 >= GUN_YIGILMA_ESIGI:
+        return (
+            f"\n\n<i>Bu, {due.strftime('%d.%m')} günü için {ayni_gun + 1}. göreviniz. "
+            f"Hepsi gerçekten o güne mi ait?</i>"
+        )
+
+    return ""
+
+
 async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
     from database import get_db
     from modules.reminders import service as svc
@@ -334,7 +416,7 @@ async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
             rec_label = svc.RECURRENCE_LABELS.get(r.get("recurrence", "none"), "")
             if rec_label:
                 msg += f"\n🔁 {rec_label}"
-            return msg
+            return msg + _itiraz(conn, owner_id, r)
 
         if action == "list":
             reminders = svc.list_reminders(conn, owner_id, False)
@@ -627,6 +709,24 @@ async def _handle_budget(action: str, params: Dict, owner_id: int) -> str:
     return f"❓ Bilinmeyen aksiyon: {action}"
 
 
+def _hafiza(owner_id: int) -> str:
+    """Kişi hakkında biriktirilmiş bilgilerin yönerge metni; hata hâlinde boş.
+
+    Hafıza bir **konfor** katmanı: olmasa da asistan çalışır, sadece kişiyi
+    tanımaz. Bu yüzden buradaki her hata yutuluyor — hafıza tablosu okunamadı
+    diye kullanıcının mesajının cevapsız kalması kabul edilemez.
+    """
+    from database import get_db
+    from modules.gozlem import hafiza
+
+    try:
+        with get_db() as conn:
+            return hafiza.yonergeye(conn, owner_id)
+    except Exception:
+        log.warning("Hafıza okunamadı (owner=%s) — yönergeye eklenmedi", owner_id)
+        return ""
+
+
 async def route_message(user_message: str, chat_id: str = "", owner_id: int = None) -> str:
     """Ana giriş: mesajı Groq'a gönderir, modüle yönlendirir, cevabı döner.
 
@@ -652,7 +752,7 @@ async def route_message(user_message: str, chat_id: str = "", owner_id: int = No
 
     try:
         history = get_recent_messages(chat_id, HISTORY_LIMIT) if chat_id else []
-        parsed = await parse_message(user_message, history, ad, hitap)
+        parsed = await parse_message(user_message, history, ad, hitap, _hafiza(owner_id))
         response = await dispatch(parsed, owner_id)
 
         if chat_id:

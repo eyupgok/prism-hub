@@ -133,6 +133,40 @@ async def send_weekly_report():
     await _herkese_ozet(summary_svc.get_weekly_report, "Haftalık rapor")
 
 
+async def gozlem_turu():
+    """Asistanın kendi başına 'söylenecek bir şey var mı' diye baktığı tur.
+
+    Diğer işlerden farkı: bu iş **mesaj göndermemek üzere** tasarlandı.
+    Turların çoğu sinyal bulamadan ya da susma bütçesine takılıp biter;
+    Groq'a ancak gerçekten bir şey fark edildiğinde uğrar.
+
+    Kimin için çalışacağı `users.gozlem_sinir`e bağlı ve o sütun sıfır
+    (kapalı) başlıyor — yani bu iş yayına alındığında hiç kimseye mesaj
+    gitmez, açmak ayrı bir komut.
+    """
+    from modules.gozlem import service as gozlem
+
+    try:
+        await gozlem.herkes_icin_tur()
+    except Exception:
+        log.exception("❌ Gözlem turu başarısız")
+
+
+async def hafiza_cikarimi():
+    """Yeni konuşmalardan kalıcı bilgileri süzüp hafızaya yazar.
+
+    Mesajın içinde değil, ayrı bir turda yapılıyor: her mesaja fazladan bir
+    Groq çağrısı eklemek cevap süresini iki katına çıkarırdı. Yeni konuşma
+    satırı yoksa model hiç çağrılmıyor.
+    """
+    from modules.gozlem import service as gozlem
+
+    try:
+        await gozlem.herkes_icin_hafiza()
+    except Exception:
+        log.exception("❌ Hafıza çıkarımı başarısız")
+
+
 def start_scheduler():
     global last_reminder_check
 
@@ -189,10 +223,33 @@ def start_scheduler():
         max_instances=1,
     )
 
+    # Gözlem turu: 09:00–21:00 arası iki saatte bir, dakika 15'te.
+    # Dakika 15 bilerek: :00'da sabah/akşam özetleri ve dakikalık hatırlatıcı
+    # işi dönüyor, kendiliğinden mesajın onlarla aynı saniyeye denk gelip arka
+    # arkaya iki bildirim olarak düşmesi istenmiyor.
+    # Sessiz saat kontrolü ayrıca `service.tur()` içinde de var — burası
+    # gereksiz turları önlüyor, oradaki ise elle çalıştırmada da koruyor.
+    scheduler.add_job(
+        gozlem_turu,
+        CronTrigger(hour="9-21/2", minute=15, timezone=TZ),
+        id="gozlem_turu",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    scheduler.add_job(
+        hafiza_cikarimi,
+        CronTrigger(hour="*/3", minute=40, timezone=TZ),
+        id="hafiza_cikarimi",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     scheduler.start()
     log.info(
         "✅ Zamanlayıcı başlatıldı (hatırlatıcı: 1 dk · sabah 08:00 · akşam 21:00 · "
-        "haftalık pazar 20:00 · temizlik 03:00 · yedek 04:00)"
+        "haftalık pazar 20:00 · temizlik 03:00 · yedek 04:00 · "
+        "gözlem 09-21 arası 2 saatte bir · hafıza 3 saatte bir)"
     )
 
 

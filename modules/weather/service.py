@@ -136,6 +136,38 @@ async def get_weather(user: Dict[str, Any] = None) -> Dict[str, Any]:
     }
 
 
+async def saatlik_tahmin(user: Dict[str, Any] = None, gun: int = 2) -> Dict[str, Dict[str, Any]]:
+    """Saat başı tahmin: {"2026-08-29T15:00": {"kod": 61, "sicaklik": 18}, ...}
+
+    `get_weather` yalnız "şu an" ve "bugünün min/max"ını veriyor. Gözlem katmanı
+    ise "yarın 15:00'teki işiniz sırasında yağmur var" diyebilmek için o saatin
+    tahminine ihtiyaç duyuyor — bu yüzden ayrı bir çağrı.
+
+    Sözlüğün anahtarı Open-Meteo'nun döndürdüğü yerel zaman damgası
+    ("YYYY-MM-DDTHH:MM"); arayan taraf hatırlatıcının saatini aynı biçime
+    çevirip doğrudan sorguluyor.
+    """
+    enlem, boylam, _ = kullanici_konumu(user)
+    url = (
+        f"https://api.open-meteo.com/v1/forecast"
+        f"?latitude={enlem}&longitude={boylam}"
+        f"&hourly=temperature_2m,weathercode"
+        f"&timezone=Europe%2FIstanbul&forecast_days={gun}"
+    )
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        hourly = resp.json()["hourly"]
+
+    return {
+        zaman: {"kod": kod, "sicaklik": round(sicaklik)}
+        for zaman, kod, sicaklik in zip(
+            hourly["time"], hourly["weathercode"], hourly["temperature_2m"]
+        )
+    }
+
+
 def format_weather_message(weather: Dict[str, Any]) -> str:
     emoji = get_weather_emoji(weather["weather_code"])
     return (
