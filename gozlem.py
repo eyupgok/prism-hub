@@ -13,6 +13,10 @@ değil; ama görülmeleri ve düzeltilebilmeleri şart. İkisinin arası burası
     python gozlem.py unut 12                      # yanlış bir bilgiyi sil
     python gozlem.py cikar "Eyüp"                 # konuşmalardan çıkarımı elle çalıştır
 
+    python gozlem.py takip                        # sonradan soracağı şeyler
+    python gozlem.py takip-cikar "Eyüp"           # takip çıkarımını elle çalıştır
+    python gozlem.py takip-unut 3                 # gereksiz bir soruyu iptal et
+
     python gozlem.py sinyal "Eyüp"                # şu an ne fark ediyor (hiçbir şey göndermez)
     python gozlem.py tur "Eyüp"                   # tam tur — ne derdi? (GÖNDERMEZ)
     python gozlem.py tur "Eyüp" --gercek          # gerçekten gönder (onay sorar)
@@ -49,7 +53,7 @@ for _akis in (sys.stdout, sys.stderr):
 load_dotenv()
 
 from database import get_db, init_db
-from modules.gozlem import hafiza, service, sinyaller
+from modules.gozlem import hafiza, service, sinyaller, takip
 
 
 def _kisi(conn, ad: str) -> dict:
@@ -119,6 +123,51 @@ def bilgi_cikar(ad: str):
     print(f"{len(eklenen)} yeni bilgi:")
     for i in eklenen:
         print(f"  + {i}")
+
+
+# ── Takip ────────────────────────────────────────────────────────────────────
+
+def takip_listele(ad: str = None):
+    with get_db() as conn:
+        if ad:
+            kisiler = [_kisi(conn, ad)]
+        else:
+            kisiler = [dict(r) for r in conn.execute("SELECT * FROM users ORDER BY id")]
+
+        simdi = datetime.now(service.TZ)
+        for k in kisiler:
+            acik = takip.acik_takipler(conn, k["id"])
+            print(f"\n=== {k['ad']} — {len(acik)} bekleyen takip ===")
+            if not acik:
+                print("  (sorulacak bir şey yok)")
+                continue
+            for t in acik:
+                vakti = datetime.fromisoformat(t["sorulacak_at"])
+                durum = "SORULABİLİR" if vakti <= simdi else f"{_saat(t['sorulacak_at'])}'de"
+                print(f"  [{t['id']:>3}] {t['konu']}  ({durum})")
+                print(f"        \"{t['soru']}\"")
+
+
+def takip_cikar(ad: str):
+    with get_db() as conn:
+        k = _kisi(conn, ad)
+
+    eklenen = asyncio.run(takip.cikar(k["id"]))
+    if not eklenen:
+        print("Sorulmaya değer yeni bir şey çıkmadı. (Konuşmaların çoğunda olağan.)")
+        return
+    print(f"{len(eklenen)} takip alındı:")
+    for i in eklenen:
+        print(f"  + {i}")
+
+
+def takip_unut(takip_id: int):
+    with get_db() as conn:
+        silinen = takip.unut(conn, takip_id)
+    if silinen:
+        print(f"Silindi: {silinen['konu']} — \"{silinen['soru']}\"")
+    else:
+        sys.exit(f"[{takip_id}] numaralı takip bulunamadı.")
 
 
 # ── Gözlem ───────────────────────────────────────────────────────────────────
@@ -246,6 +295,15 @@ def main():
     p_cikar = alt.add_parser("cikar", help="konuşmalardan çıkarımı elle çalıştırır")
     p_cikar.add_argument("kisi")
 
+    p_takip = alt.add_parser("takip", help="sonradan sorulacak şeyler")
+    p_takip.add_argument("--kisi", default=None)
+
+    p_tcikar = alt.add_parser("takip-cikar", help="konuşmalardan takip çıkarımını elle çalıştırır")
+    p_tcikar.add_argument("kisi")
+
+    p_tunut = alt.add_parser("takip-unut", help="bir takibi siler")
+    p_tunut.add_argument("id", type=int)
+
     p_sinyal = alt.add_parser("sinyal", help="şu anki sinyaller (hiçbir şey göndermez)")
     p_sinyal.add_argument("kisi")
 
@@ -273,6 +331,12 @@ def main():
         bilgi_unut(a.id)
     elif a.komut == "cikar":
         bilgi_cikar(a.kisi)
+    elif a.komut == "takip":
+        takip_listele(a.kisi)
+    elif a.komut == "takip-cikar":
+        takip_cikar(a.kisi)
+    elif a.komut == "takip-unut":
+        takip_unut(a.id)
     elif a.komut == "sinyal":
         sinyal_goster(a.kisi)
     elif a.komut == "tur":

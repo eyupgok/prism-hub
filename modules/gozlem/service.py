@@ -87,6 +87,10 @@ Her sinyalin başında türü yazıyor:
 - **[ARIZA]** — bozulmuş ve düzeltilebilir bir şey. Burada varsayılan
   **söylemektir**. Arızanın tanımı gereği kullanıcının haberi yoktur; haberi
   olsaydı çoktan düzeltmişti. Bunu ondan önce fark etmek senin işin.
+- **[TAKIP]** — kullanıcının kendi ağzından çıkmış bir olayın sonucu.
+  Burada varsayılan **sormaktır**. Sorulacak şeyi kullanıcı zaten kendisi
+  söylemişti; sormamak ilgisizlik olur. Kanıttaki soruyu kendi
+  kelimelerinle, kısaca sor — dosya numarası okur gibi değil.
 
 ## KURALLAR
 1. **Susmak, DURUM sinyallerinde varsayılan cevaptır** — ama gerekçesiz değil.
@@ -94,7 +98,7 @@ Her sinyalin başında türü yazıyor:
    düşünmek için somut bir sebep olmalı. Söylemek için: bilmediği bir şey,
    kaçırmak üzere olduğu bir fırsat, ya da düzeltebileceği bir aksaklık.
 2. En fazla **BİR** tanesini seç. Liste yapma, birkaçını birleştirme.
-   Elinde hem ARIZA hem DURUM varsa ARIZA'yı seç.
+   Elinde TAKIP ya da ARIZA varsa onu seç, DURUM en son sırada.
 3. **Yalnız yukarıdaki kanıtlarda yazan bilgiyi kullan.** Sayı, tarih, isim,
    tutar UYDURMA. Orada yazmayan hiçbir şeyi söyleme.
 4. Kısa yaz: en fazla üç cümle. Bu bir hatırlatma, rapor değil.
@@ -347,6 +351,13 @@ async def tur(owner_id: int, kuru: bool = False, now: datetime = None) -> Dict[s
     with get_db() as conn:
         _gunluge_yaz(conn, owner_id, "konustu", str(karar.get("sebep") or ""),
                      anahtar=anahtar, mesaj=mesaj, gorulen=gorulen)
+        # Takip sorusu bir kez sorulur. İşaretleme gönderimden SONRA:
+        # gönderim patlarsa soru sorulmamış sayılıp bir sonraki turda
+        # yeniden denenmeli.
+        if anahtar.startswith("takip:"):
+            from modules.gozlem import takip as takip_modulu
+
+            takip_modulu.soruldu(conn, int(anahtar.split(":", 1)[1]))
 
     log.info("Gözlem mesajı gönderildi (owner=%s, konu=%s)", owner_id, anahtar)
     return _sonuc("konustu", str(karar.get("sebep") or ""),
@@ -371,16 +382,22 @@ async def herkes_icin_tur():
 
 
 async def herkes_icin_hafiza():
-    """Zamanlayıcının çağırdığı iş — konuşmalardan bilgi çıkarımı.
+    """Zamanlayıcının çağırdığı iş — konuşmalardan bilgi ve takip çıkarımı.
 
-    Gözlem sınırından bağımsız: hafıza kendiliğinden mesaj göndermiyor, sadece
-    asistanın verdiği cevapları kişiselleştiriyor. Kapalı kullanıcı için de
-    birikmesi doğru.
+    Gözlem sınırından bağımsız: ikisi de kendiliğinden mesaj göndermiyor.
+    Hafıza asistanın cevaplarını kişiselleştiriyor, takip ise yalnız
+    `takipler` tablosuna yazıyor — o kayıt ancak gözlem turunda, susma
+    bütçesine tabi olarak soruya dönüşüyor. Kapalı kullanıcı için de
+    birikmesi doğru: seviye açıldığı gün elde birikmiş bağlam olur.
+
+    İkisi ayrı `try` içinde: hafıza çıkarımı çökerse takip yine çalışsın.
     """
     from auth import tum_kullanicilar
+    from modules.gozlem import takip
 
     for k in tum_kullanicilar():
-        try:
-            await hafiza.cikar(k["id"])
-        except Exception:
-            log.exception("Hafıza çıkarımı çöktü (%s)", k["ad"])
+        for ad, cikarici in (("Hafıza", hafiza.cikar), ("Takip", takip.cikar)):
+            try:
+                await cikarici(k["id"])
+            except Exception:
+                log.exception("%s çıkarımı çöktü (%s)", ad, k["ad"])

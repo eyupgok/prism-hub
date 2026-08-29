@@ -57,9 +57,10 @@ tanitim.py           → Telegram'dan arka arkaya mesaj yollayıp paneli açmaya
                        ⚠️ Gönderilen mesaj geri alınamaz — sıra: --liste, kendine
                        prova, sonra gerçeği.
 gozlem.py            → Gözlem katmanının denetim aracı: asistanın hafızası
-                       (`bilgi` / `ekle` / `unut` / `cikar`), kendiliğinden
-                       konuşma kararları (`sinyal` / `tur` / `gunluk`) ve
-                       kişi başına günlük mesaj sınırı (`seviye`).
+                       (`bilgi` / `ekle` / `unut` / `cikar`), sonradan
+                       soracakları (`takip` / `takip-cikar` / `takip-unut`),
+                       kendiliğinden konuşma kararları (`sinyal` / `tur` /
+                       `gunluk`) ve kişi başına günlük mesaj sınırı (`seviye`).
                        `tur` varsayılan olarak GÖNDERMEZ — `--gercek` gerekir.
                        Panelde karşılığı YOK, bilerek → "Gözlem Katmanı".
 gecmis.py            → Konuşma geçmişini okur (--kisi / --son / --ara / --ham).
@@ -113,11 +114,15 @@ modules/
     service.py  → Hava + görevler + harcama + notlar birleştirme
     routes.py
   gozlem/       → ASİSTANIN İKİNCİ DÖNGÜSÜ (ayrıntı → "Gözlem Katmanı")
-    models.py   → hafiza + gozlem_gunlugu + gozlem_durum tabloları
+    models.py   → hafiza + takipler + gozlem_gunlugu + gozlem_durum tabloları
                    + users.gozlem_sinir göçü (DEFAULT 0 = herkes kapalı)
     sinyaller.py→ Deterministik sinyal üretimi (SQL + aritmetik). Modelin
                    uydurabileceği hiçbir şey yok; eşikler dosyanın başında.
-    hafiza.py   → Konuşmalardan kalıcı bilgi çıkarımı + yönergeye enjeksiyon
+    konusma.py  → Konuşma dökümü okuma — hafıza ve takip çıkarımlarının
+                   ortak zemini (kanal çözümü + damga + asistan JSON'u ayıklama)
+    hafiza.py   → Konuşmalardan KALICI bilgi çıkarımı + yönergeye enjeksiyon
+    takip.py    → Konuşmalardan SONRADAN SORULACAK olay çıkarımı
+                   ("yarın dişçiye gidiyorum" → ertesi akşam "nasıl geçti?")
     service.py  → Gözlem turu: sinyal topla → susma bütçesi → modele sor →
                    gönder → kararı (SUSTUĞU turlar dahil) günlüğe yaz
   ozel/
@@ -261,13 +266,22 @@ hafiza       (owner_id, id, icerik, tur[alışkanlık|tercih|durum|ilişki|olgu]
                 yalan olurlar. Geçici olanlar `gecerlilik` tarihiyle girer.
               → UNIQUE(owner_id, icerik). Panelde görünmez; `gozlem.py bilgi`.
 
+takipler     (owner_id, id, konu, soru, sorulacak_at, soruldu_at, created_at)
+              → Kullanıcının ağzından çıkan, sonradan sorulmaya değer olaylar.
+                Hatırlatıcı değil (kullanıcı kurmadı), not değil, hafıza da
+                değil (tek seferlik). `sorulacak_at`'ten önce sorulmaz, bir kez
+                sorulur, `TAKIP_BAYATLAMA_GUNU` (3) geçerse düşer.
+              → UNIQUE(owner_id, konu). Kişi başına en fazla AZAMI_ACIK_TAKIP (5).
+
 gozlem_gunlugu (owner_id, id, karar[konustu|sustu], anahtar, mesaj, sebep,
               sinyaller, created_at)
               → Her gözlem turunun kararı. SUSTUĞU turlar da yazılır — eşikleri
                 ayarlamanın tek yolu o satırlar (`gozlem.py gunluk`).
 
-gozlem_durum (owner_id, son_hafiza_conv_id)
-              → Hafıza çıkarımı `conversations` tablosunda nereye kadar geldi
+gozlem_durum (owner_id, son_hafiza_conv_id, son_takip_conv_id)
+              → Çıkarımlar `conversations` tablosunda nereye kadar geldi.
+                İki damga ayrı: biri hata verdiğinde diğerinin de o
+                konuşmaları atlaması gerekmiyor.
 
 conversations (id, chat_id, role[user|assistant], content, created_at)
               → INDEX: idx_conv_chat(chat_id)
@@ -383,6 +397,7 @@ isim uyduramaz.
 
 | Anahtar | Ne yakalar | Ağırlık |
 |---|---|---|
+| `takip:<id>` | Sorulma vakti gelmiş takip ("dişçi nasıl geçti?") | 3 |
 | `harcama_sessizligi` | Telefondaki dinleyici ölmüş (otomatik kayıt akışı kesildi) | 3 |
 | `butce_asildi:<kat>` | Aylık limit geçildi | 3 |
 | `butce_hizi:<kat>` | Harcama oranı ayın geçen oranını çok aşıyor | 2 |
@@ -394,7 +409,7 @@ isim uyduramaz.
 | `tamamlama_orani` | Kurma hızı bitirme hızını çok aşıyor | 1 |
 | `ev_halki:<id>` | Diğer kişinin yaklaşan Kritik/Önemli görevi | 1 |
 
-### Sinyal türü: DURUM vs ARIZA
+### Sinyal türü: DURUM / ARIZA / TAKIP
 
 Her sinyalin bir `kategori`si var ve bu, **modelin susma eşiğini tersine
 çevirebiliyor**:
@@ -402,6 +417,9 @@ Her sinyalin bir `kategori`si var ve bu, **modelin susma eşiğini tersine
 - **`DURUM`** — kullanıcının taraf olduğu bir hâl (bütçe, görev, hava).
   Varsayılan susmak; söylemek için sebep gerekir.
 - **`ARIZA`** — bozulmuş ve düzeltilebilir bir şey. Varsayılan **söylemek**.
+- **`TAKIP`** — kullanıcının kendi ağzından çıkmış bir olayın sonucu.
+  Varsayılan **sormak**: sorulacak şeyi kendisi söylemişti, sormamak
+  ilgisizlik olur.
 
 ⚠️ Ayrım ilk gerçek turda ortaya çıktı: model `harcama_sessizligi`'ni görüp
 *"kullanıcı zaten biliyor olabilir"* diyerek sustu — oysa dinleyici gerçekten
@@ -472,6 +490,36 @@ düzeltilebilmesi şart ama gündelik arayüzde durması gerekmiyor:
 python gozlem.py bilgi                       # kim hakkında ne biliyor
 python gozlem.py unut 12                     # yanlış bir bilgiyi sil
 python gozlem.py ekle "Eyüp" "..." --tur tercih
+```
+
+### Takip (`modules/gozlem/takip.py`)
+
+"Yarın dişçiye gidiyorum" cümlesi hiçbir tabloya girmiyor: hatırlatıcı değil
+(kullanıcı kurmadı), not değil, hafıza da değil (kalıcı bir özellik değil,
+tek seferlik bir olay — hafızaya yazılsa bir hafta sonra orada yalan olurdu).
+Ama bir uşağı asistandan ayıran şey tam da ertesi akşam **"dişçi nasıl
+geçti?"** diye sorabilmesi.
+
+Hafıza çıkarımıyla aynı turda, **ayrı bir model çağrısıyla ve ayrı damgayla**
+çalışıyor. Tek yönergeye sıkıştırılabilirdi; ayrı tutulmasının sebebi
+kuralların gerçekten farklı olması — biri kalıcı özellik arıyor, diğeri
+bitecek bir olay. Aynı yönergede ikisi de zayıflıyor.
+
+⚠️ **Soru, sinyal olarak gözlem turundan geçiyor** (`takip:<id>`), yani aynı
+susma bütçesine tabi. Ayrı bir gönderme yolu açılsaydı günde 3 mesaj sınırı
+sessizce delinirdi.
+
+⚠️ **Bayatlayan takip düşer** (`TAKIP_BAYATLAMA_GUNU` = 3 gün). Geç kalmış
+soru sorulmamış sorudan kötü: "geçen hafta dişçi nasıl geçti?" ilgi değil
+dalgınlık gösterir.
+
+⚠️ **İşaretleme gönderimden SONRA** (`service.tur`): Telegram'a ulaşılamazsa
+soru sorulmamış sayılıp bir sonraki turda yeniden denenmeli.
+
+```bash
+python gozlem.py takip                 # sorulmayı bekleyenler
+python gozlem.py takip-cikar "Eyüp"    # çıkarımı elle çalıştır
+python gozlem.py takip-unut 3          # gereksiz bir soruyu iptal et
 ```
 
 ### İtiraz
@@ -735,8 +783,9 @@ ingest ve ai_router prompt'larında açıkça yazılı.
   yollamadan yayına giriyor). Dakika 15 bilerek: :00'da özetler ve dakikalık
   hatırlatıcı işi dönüyor, iki bildirimin üst üste düşmesi istenmiyor.
 - **Her 3 saatte bir (dakika 40):** `hafiza_cikarimi()` → yeni konuşmalardan
-  kalıcı bilgileri süzüp `hafiza` tablosuna yazar. Yeni satır yoksa Groq'a
-  hiç uğramaz.
+  hem kalıcı bilgileri (`hafiza`) hem sonradan sorulacak olayları (`takipler`)
+  süzer. İki ayrı model çağrısı, ayrı `try` blokları — biri çökerse diğeri
+  yine çalışır. Yeni konuşma satırı yoksa Groq'a hiç uğramaz.
 - **Her gece 04:00:** `nightly_backup()` → `backup.py` SQLite backup API ile tutarlı kopya alır,
   gzip'ler, Telegram'a dosya olarak gönderir. `/yedek` komutuyla elle de tetiklenir.
   Sunucu tamamen kaybolsa bile yedek Telegram sohbetinde durur.

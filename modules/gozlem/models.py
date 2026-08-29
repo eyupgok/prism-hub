@@ -33,8 +33,19 @@ TURLER = ("alışkanlık", "tercih", "durum", "ilişki", "olgu")
 AZAMI_BILGI = 60
 
 
+# Bir kişi için aynı anda açık durabilecek azami takip sayısı. Sınır şart:
+# her konuşmadan birkaç takip çıkarsa asistan sorgu hâkimi gibi olur.
+AZAMI_ACIK_TAKIP = 5
+
+# Sorulma vakti geldikten sonra bu kadar gün içinde sorulmazsa takip düşer.
+# Geç kalmış soru sorulmamış sorudan kötü: "geçen hafta dişçi nasıl geçti?"
+# ilgi değil dalgınlık gösterir.
+TAKIP_BAYATLAMA_GUNU = 3
+
+
 def create_gozlem_tables(conn: sqlite3.Connection):
     _hafiza(conn)
+    _takipler(conn)
     _gunluk(conn)
     _durum(conn)
     _migrate_gozlem_sinir(conn)
@@ -67,6 +78,34 @@ def _hafiza(conn: sqlite3.Connection):
     sahiplik_sutunu_ekle(conn, "hafiza")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_hafiza_tekil ON hafiza(owner_id, icerik)"
+    )
+
+
+def _takipler(conn: sqlite3.Connection):
+    """Kullanıcının ağzından çıkan, sonradan sorulmaya değer şeyler.
+
+    "Yarın dişçiye gidiyorum" cümlesi hiçbir tabloya girmiyor: hatırlatıcı
+    değil (kullanıcı kurmadı), not değil, hafıza da değil (kalıcı bir şey
+    değil, tek seferlik bir olay). Ama bir uşağın ertesi akşam "dişçi nasıl
+    geçti?" diye sorması, onu asistan olmaktan çıkarıp ilgili bir insana
+    çeviren şeydir.
+
+    `sorulacak_at`  → bu andan önce sorulmaz (olay daha yaşanmadı)
+    `soruldu_at`    → bir kez sorulur, tekrar edilmez
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS takipler (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            konu         TEXT    NOT NULL,
+            soru         TEXT    NOT NULL,
+            sorulacak_at TEXT    NOT NULL,
+            soruldu_at   TEXT,
+            created_at   TEXT    NOT NULL
+        )
+    """)
+    sahiplik_sutunu_ekle(conn, "takipler")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_takip_tekil ON takipler(owner_id, konu)"
     )
 
 
@@ -111,6 +150,14 @@ def _durum(conn: sqlite3.Connection):
             son_hafiza_conv_id INTEGER NOT NULL DEFAULT 0
         )
     """)
+    # Takip çıkarımının damgası ayrı: hafıza çıkarımı hata verdiğinde takip
+    # çıkarımının da o konuşmaları atlaması gerekmiyor. İkisi bağımsız
+    # ilerliyor, biri diğerini sürüklemiyor.
+    mevcut = {row["name"] for row in conn.execute("PRAGMA table_info(gozlem_durum)")}
+    if "son_takip_conv_id" not in mevcut:
+        conn.execute(
+            "ALTER TABLE gozlem_durum ADD COLUMN son_takip_conv_id INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _migrate_gozlem_sinir(conn: sqlite3.Connection):

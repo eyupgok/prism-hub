@@ -53,6 +53,11 @@ TUR_BASINA_AZAMI = 5
 # Çıkarım turunda modele verilecek azami konuşma satırı.
 CIKARIM_SATIR_SINIRI = 60
 
+# Nereye kadar okunduğunun damgası (`gozlem_durum` sütunu). Takip çıkarımının
+# damgası ayrı: biri hata verdiğinde diğerinin de o konuşmaları atlaması
+# gerekmiyor.
+DAMGA = "son_hafiza_conv_id"
+
 
 CIKARIM_YONERGESI = """\
 Bir kişisel asistanın hafıza katmanısın. Görevin, aşağıdaki konuşma
@@ -197,58 +202,6 @@ def yonergeye(conn, owner_id: int) -> str:
 
 # ── Çıkarım ──────────────────────────────────────────────────────────────────
 
-def _kanallar(conn, owner_id: int) -> List[str]:
-    """Kişinin yazışmalarının geçtiği chat_id'ler: panel + Telegram.
-
-    `conversations` tablosunda `owner_id` yok (bilerek — bkz. database.py),
-    ayrım chat_id'de. Bir kişinin iki kanalı olabiliyor.
-    """
-    row = conn.execute("SELECT telegram_chat_id FROM users WHERE id = ?", (owner_id,)).fetchone()
-    kanallar = [f"panel:{owner_id}"]
-    if row and row["telegram_chat_id"]:
-        kanallar.append(str(row["telegram_chat_id"]))
-    return kanallar
-
-
-def _dokum(satirlar: List[Dict], ad: str) -> str:
-    """Konuşma satırlarını modele verilecek düz metne çevirir.
-
-    Asistan satırları ham JSON olarak saklanıyor. Komut JSON'ları atlanıyor
-    (içlerinde kalıcı bilgi yok, sadece gürültü), yalnız sohbet yanıtları
-    metin olarak alınıyor — soruyu görmeden cevabı anlamak mümkün olmuyor
-    ("Nerelisiniz?" → "Elazığ").
-    """
-    cikti = []
-    for r in satirlar:
-        if r["role"] == "user":
-            cikti.append(f"{ad}: {r['content']}")
-            continue
-        try:
-            veri = json.loads(r["content"])
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(veri, dict) and veri.get("module") == "chat":
-            mesaj = (veri.get("params") or {}).get("message", "")
-            if mesaj:
-                cikti.append(f"PRISM: {mesaj}")
-    return "\n".join(cikti)
-
-
-def _damga(conn, owner_id: int) -> int:
-    row = conn.execute(
-        "SELECT son_hafiza_conv_id FROM gozlem_durum WHERE owner_id = ?", (owner_id,)
-    ).fetchone()
-    return row["son_hafiza_conv_id"] if row else 0
-
-
-def _damga_yaz(conn, owner_id: int, conv_id: int):
-    conn.execute(
-        "INSERT INTO gozlem_durum (owner_id, son_hafiza_conv_id) VALUES (?, ?) "
-        "ON CONFLICT(owner_id) DO UPDATE SET son_hafiza_conv_id = excluded.son_hafiza_conv_id",
-        (owner_id, conv_id),
-    )
-
-
 async def cikar(owner_id: int) -> List[str]:
     """Yeni konuşmalardan bilgi çıkarır ve kaydeder; eklenen bilgileri döner.
 
@@ -259,6 +212,7 @@ async def cikar(owner_id: int) -> List[str]:
     """
     from database import get_db
     from groq_client import complete_json
+    from modules.gozlem import konusma
 
     with get_db() as conn:
         kullanici = conn.execute("SELECT ad FROM users WHERE id = ?", (owner_id,)).fetchone()
@@ -266,26 +220,15 @@ async def cikar(owner_id: int) -> List[str]:
             return []
         ad = kullanici["ad"]
 
-        kanallar = _kanallar(conn, owner_id)
-        son_id = _damga(conn, owner_id)
-        satirlar = [dict(r) for r in conn.execute(
-            f"SELECT id, role, content FROM conversations "
-            f"WHERE id > ? AND chat_id IN ({','.join('?' * len(kanallar))}) "
-            f"ORDER BY id ASC LIMIT ?",
-            (son_id, *kanallar, CIKARIM_SATIR_SINIRI),
-        ).fetchall()]
-
-        if not satirlar:
+        son_id = konusma.damga_oku(conn, owner_id, DAMGA)
+        dokum, en_son = konusma.yeni_dokum(conn, owner_id, son_id, CIKARIM_SATIR_SINIRI)
+        if en_son is None:
             return []
-
         mevcut = listele(conn, owner_id)
-
-    dokum = _dokum(satirlar, ad)
-    en_son = satirlar[-1]["id"]
 
     if not dokum.strip():
         with get_db() as conn:
-            _damga_yaz(conn, owner_id, en_son)
+            konusma.damga_yaz(conn, owner_id, DAMGA, en_son)
         return []
 
     yonerge = CIKARIM_YONERGESI.format(
@@ -320,7 +263,7 @@ async def cikar(owner_id: int) -> List[str]:
             )
             if yeni:
                 eklenen.append(yeni["icerik"])
-        _damga_yaz(conn, owner_id, en_son)
+        konusma.damga_yaz(conn, owner_id, DAMGA, en_son)
         temizle(conn)
 
     if eklenen:

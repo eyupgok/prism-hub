@@ -93,6 +93,9 @@ def _para(deger: float) -> str:
 #   durum  → kullanıcının taraf olduğu bir hâl (bütçe, görev yığılması, hava).
 #            Varsayılan SUSMAK; söylemek için gerçek bir sebep gerekiyor.
 #   ariza  → bozulmuş ve düzeltilebilir bir şey. Varsayılan TERSİNE DÖNER.
+#   takip  → kullanıcının kendi ağzından çıkmış, sonucu sorulacak bir olay.
+#            Varsayılan SORMAK: sormamak ilgisizliktir, sorulacak şeyi
+#            kullanıcı zaten kendisi söylemiştir.
 #
 # Ayrım ilk gerçek turda ortaya çıktı: model `harcama_sessizligi` sinyalini
 # görüp "kullanıcı zaten biliyor olabilir" diyerek sustu. Oysa arızanın tanımı
@@ -103,6 +106,7 @@ def _para(deger: float) -> str:
 # kullanıcı zaten %80'de uyarı almış oluyor.
 DURUM = "durum"
 ARIZA = "ariza"
+TAKIP = "takip"
 
 
 def _sinyal(anahtar: str, kanit: str, agirlik: int = 2, kategori: str = DURUM) -> Dict[str, Any]:
@@ -453,6 +457,30 @@ def ev_halki(conn, owner_id: int, now: datetime) -> List[Dict]:
     return bulunan
 
 
+def bekleyen_takip(conn, owner_id: int, now: datetime) -> List[Dict]:
+    """Sorulma vakti gelmiş takipler (bkz. `modules/gozlem/takip.py`).
+
+    Takip sorusunun buradan, sinyal olarak geçmesi bilinçli: böylece aynı
+    susma bütçesine tabi oluyor. Ayrı bir gönderme yolu açılsaydı günde 3
+    mesaj sınırı sessizce delinirdi.
+
+    Ağırlık 3, çünkü bu sinyal zamana bağlı: bir iki gün içinde sorulmazsa
+    bayatlayıp düşüyor. Bütçe sinyalinin ise beklemekle kaybettiği bir şey yok.
+    """
+    from modules.gozlem import takip as takip_modulu
+
+    return [
+        _sinyal(
+            f"takip:{t['id']}",
+            f"kullanıcı daha önce '{t['konu']}' konusundan bahsetmişti; "
+            f"sorulacak soru: \"{t['soru']}\"",
+            agirlik=3,
+            kategori=TAKIP,
+        )
+        for t in takip_modulu.vakti_gelenler(conn, owner_id, now)
+    ]
+
+
 # ── Toplayıcı ────────────────────────────────────────────────────────────────
 
 async def topla(conn, owner_id: int, user: Dict, now: datetime = None) -> List[Dict]:
@@ -466,7 +494,7 @@ async def topla(conn, owner_id: int, user: Dict, now: datetime = None) -> List[D
     sinyaller: List[Dict] = []
 
     tekil = (harcama_sessizligi, olagandisi_harcama, gecikmis_gorevler, tamamlama_orani)
-    coklu = (butce, gorev_yigilmasi, inatci_gorev, ev_halki)
+    coklu = (butce, gorev_yigilmasi, inatci_gorev, ev_halki, bekleyen_takip)
 
     for uretici in tekil:
         try:

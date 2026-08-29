@@ -18,8 +18,8 @@ import pytz
 
 import ai_router
 from conftest import OTEKI, SAHIP
-from modules.gozlem import hafiza, service, sinyaller
-from modules.gozlem.models import AZAMI_BILGI
+from modules.gozlem import hafiza, service, sinyaller, takip
+from modules.gozlem.models import AZAMI_ACIK_TAKIP, AZAMI_BILGI, TAKIP_BAYATLAMA_GUNU
 from modules.reminders import service as rem
 
 TZ = pytz.timezone("Europe/Istanbul")
@@ -290,6 +290,83 @@ def test_olagandisi_harcama_buyuk_sicramayi_yakalar(db):
     assert s and s["anahtar"].startswith("olagandisi_harcama:")
 
 
+# ── Takip ────────────────────────────────────────────────────────────────────
+# Takip "yarın dişçiye gidiyorum" gibi hiçbir tabloya girmeyen bir cümleyi
+# ertesi akşam sorulacak bir soruya çeviriyor.
+
+def _takip(db, owner=SAHIP, konu="dişçi randevusu", saat_farki=0):
+    an = datetime.now(TZ) + timedelta(hours=saat_farki)
+    return takip.ekle(db, owner, konu, f"{konu} nasıl geçti?", an.isoformat())
+
+
+def test_takip_vakti_gelmeden_sorulmaz(db):
+    _takip(db, saat_farki=+5)
+
+    assert takip.acik_takipler(db, SAHIP)          # kayıt duruyor
+    assert takip.vakti_gelenler(db, SAHIP, datetime.now(TZ)) == []
+
+
+def test_takip_vakti_gelince_sinyale_donuyor(db):
+    t = _takip(db, saat_farki=-1)
+
+    bulunan = sinyaller.bekleyen_takip(db, SAHIP, datetime.now(TZ))
+
+    assert len(bulunan) == 1
+    assert bulunan[0]["anahtar"] == f"takip:{t['id']}"
+    assert bulunan[0]["kategori"] == sinyaller.TAKIP
+    assert "nasıl geçti?" in bulunan[0]["kanit"]
+
+
+def test_sorulmus_takip_tekrar_sorulmaz(db):
+    t = _takip(db, saat_farki=-1)
+    takip.soruldu(db, t["id"])
+
+    assert takip.vakti_gelenler(db, SAHIP, datetime.now(TZ)) == []
+    assert takip.acik_takipler(db, SAHIP) == []
+
+
+def test_bayatlayan_takip_dusuyor(db):
+    """Geç kalmış soru sorulmamış sorudan kötü: 'geçen hafta dişçi nasıl
+    geçti?' ilgi değil dalgınlık gösterir."""
+    _takip(db, saat_farki=-24 * (TAKIP_BAYATLAMA_GUNU + 1))
+
+    assert takip.acik_takipler(db, SAHIP) == []
+    assert takip.vakti_gelenler(db, SAHIP, datetime.now(TZ)) == []
+
+    takip.temizle(db)
+    assert db.execute("SELECT COUNT(*) c FROM takipler").fetchone()["c"] == 0
+
+
+def test_ayni_konu_iki_kez_alinmaz(db):
+    _takip(db, konu="dişçi randevusu")
+
+    assert _takip(db, konu="dişçi randevusu") is None
+    assert len(takip.acik_takipler(db, SAHIP)) == 1
+
+
+def test_takip_sinirini_asmaz(db):
+    """Her konuşmadan birkaç takip çıkarsa asistan sorgu hâkimi olur."""
+    for i in range(AZAMI_ACIK_TAKIP + 3):
+        _takip(db, konu=f"konu {i}", saat_farki=+1)
+
+    assert len(takip.acik_takipler(db, SAHIP)) == AZAMI_ACIK_TAKIP
+
+
+def test_bozuk_zaman_damgasi_kayit_acmaz(db):
+    assert takip.ekle(db, SAHIP, "konu", "soru?", "yarın akşam") is None
+    assert takip.ekle(db, SAHIP, "", "soru?", datetime.now(TZ).isoformat()) is None
+
+
+def test_takip_kisiye_ozel(db):
+    _takip(db, owner=SAHIP, konu="dişçi", saat_farki=-1)
+    _takip(db, owner=OTEKI, konu="sınav", saat_farki=-1)
+
+    bulunan = sinyaller.bekleyen_takip(db, SAHIP, datetime.now(TZ))
+
+    assert len(bulunan) == 1
+    assert "dişçi" in bulunan[0]["kanit"]
+
+
 # ── Susma bütçesi ────────────────────────────────────────────────────────────
 
 @pytest.fixture()
@@ -527,6 +604,61 @@ async def test_kategorisiz_sinyal_durum_sayilir(db, sinyalli, monkeypatch):
     await service.tur(SAHIP, now=_an())
 
     assert "[DURUM] [test_konu]" in gorulen[0]
+
+
+@pytest.mark.asyncio
+async def test_takip_sorulunca_isaretleniyor(db, monkeypatch):
+    """Uçtan uca: bekleyen takip → sinyal → mesaj → bir daha sorulmaz."""
+    t = _takip(db, saat_farki=-1)
+    _ac(db)
+
+    async def soyleyen(messages, **kw):
+        return {"soyle": True, "anahtar": f"takip:{t['id']}",
+                "mesaj": "Dişçi nasıl geçti, efendim?", "sebep": "takip"}
+
+    gonderilen = []
+
+    async def sahte_gonder(text, chat_id=None, **kw):
+        gonderilen.append(text)
+        return {}
+
+    import groq_client
+    import telegram_bot
+    monkeypatch.setattr(groq_client, "complete_json", soyleyen)
+    monkeypatch.setattr(telegram_bot, "send_message", sahte_gonder)
+
+    sonuc = await service.tur(SAHIP, now=_an())
+
+    assert sonuc["karar"] == "konustu"
+    assert "Dişçi nasıl geçti" in gonderilen[0]
+
+    satir = db.execute("SELECT soruldu_at FROM takipler WHERE id = ?", (t["id"],)).fetchone()
+    assert satir["soruldu_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_takip_gonderilemezse_sorulmus_sayilmaz(db, monkeypatch):
+    """Telegram'a ulaşamadıysak soru sorulmamıştır; bir sonraki turda
+    yeniden denenmeli."""
+    t = _takip(db, saat_farki=-1)
+    _ac(db)
+
+    async def soyleyen(messages, **kw):
+        return {"soyle": True, "anahtar": f"takip:{t['id']}", "mesaj": "Soru?", "sebep": ""}
+
+    async def patlayan(text, chat_id=None, **kw):
+        raise RuntimeError("Telegram ulaşılamıyor")
+
+    import groq_client
+    import telegram_bot
+    monkeypatch.setattr(groq_client, "complete_json", soyleyen)
+    monkeypatch.setattr(telegram_bot, "send_message", patlayan)
+
+    with pytest.raises(RuntimeError):
+        await service.tur(SAHIP, now=_an())
+
+    satir = db.execute("SELECT soruldu_at FROM takipler WHERE id = ?", (t["id"],)).fetchone()
+    assert satir["soruldu_at"] is None
 
 
 @pytest.mark.asyncio
