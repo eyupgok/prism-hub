@@ -80,7 +80,7 @@ function saatEtiketi(iso) {
 }
 
 export default function Sohbet() {
-  const { kullanici, saltOkunur } = useKullanici()
+  const { kullanici, bakilan, saltOkunur } = useKullanici()
   const [mesajlar, setMesajlar] = useState([])
   const [yukleniyor, setYukleniyor] = useState(true)
   // Hangi baloncuk şu an konuşuyor (index) — aynı anda yalnız biri çalar
@@ -246,10 +246,14 @@ export default function Sohbet() {
         <h1 className="text-2xl font-display font-bold text-white">PRISM</h1>
       </div>
 
+      {/* Kişi şeridi sohbeti DEĞİŞTİRMİYOR: kova her zaman giriş yapanın.
+          Not eskiden yalnız yazmadan bahsediyordu, o yüzden "Zeynep'e
+          geçtim ama hâlâ benim mesajlarım duruyor" sorusu çıktı. */}
       {saltOkunur && (
         <p className="glass-card p-3 mb-4 text-xs" style={{ color: 'var(--text-soft)' }}>
-          Sohbet her zaman <strong className="text-white">{kullanici?.ad}</strong> adına çalışır —
-          yazdığın şey senin hatırlatıcına, notuna, harcamana gider.
+          Bu sohbet <strong className="text-white">{kullanici?.ad}</strong> ile PRISM arasında —
+          {' '}{bakilan?.ad} kişisinin konuşmaları burada görünmez, yazdığın şey de
+          senin hatırlatıcına, notuna, harcamana gider.
         </p>
       )}
 
