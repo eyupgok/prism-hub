@@ -112,6 +112,43 @@ def test_bayatlayan_ileti_gonderilmiyor(db):
     assert svc.vakti_gelenler(db, now=_an()) == []
 
 
+# ── İmzalı / imzasız kip ─────────────────────────────────────────────────────
+
+def test_varsayilan_imzali(db):
+    """⚠️ En önemli varsayılan: kaynağı gereksiz göstermek düzeltilebilir,
+    göstermemek geri alınamaz. Belirtilmediyse imzalı gider."""
+    assert _ileti(db)["imzasiz"] == 0
+
+
+def test_imzasiz_istenirse_isaretleniyor(db):
+    ileti = svc.olustur(db, SAHIP, "Öteki", "yağmur var", None, now=_an(), imzasiz=True)
+
+    assert ileti["imzasiz"] == 1
+    assert svc.vakti_gelenler(db, now=_an())[0]["imzasiz"] == 1
+
+
+def test_kip_bekleyenler_listesinde_gorunuyor(db):
+    """Kullanıcı bekleyen iletiye baktığında hangisinin kaynağı göstereceğini
+    ayırt edebilmeli."""
+    svc.olustur(db, SAHIP, "Öteki", "imzalı", (_an() + timedelta(hours=1)).isoformat(), now=_an())
+    svc.olustur(db, SAHIP, "Öteki", "imzasız", (_an() + timedelta(hours=2)).isoformat(),
+                now=_an(), imzasiz=True)
+
+    assert [i["imzasiz"] for i in svc.bekleyenler(db, SAHIP)] == [0, 1]
+
+
+def test_eski_kayitlar_imzali_sayiliyor(db):
+    """Sütun sonradan eklendi (DEFAULT 0). Göç öncesi kayıtlar kaynağı
+    GÖSTEREN biçimde gitmeli — sessizce imzasıza dönmemeli."""
+    db.execute(
+        "INSERT INTO iletiler (gonderen_id, alici_id, mesaj, iletilecek_at, created_at) "
+        "VALUES (?, ?, 'eski', ?, ?)",
+        (SAHIP, OTEKI, _an().isoformat(), _an().isoformat()),
+    )
+
+    assert svc.vakti_gelenler(db, now=_an())[0]["imzasiz"] == 0
+
+
 # ── Gönderim ve iptal ────────────────────────────────────────────────────────
 
 def test_iletilen_bir_daha_gonderilmiyor(db):
@@ -146,6 +183,63 @@ def test_bekleyen_sinirini_asmaz(db):
 
     with pytest.raises(svc.IletiHatasi, match="sınır"):
         _ileti(db, mesaj="fazlalık", saat_farki=+3)
+
+
+# ── Alıcının gerçekten gördüğü metin ─────────────────────────────────────────
+
+def _gonder(db, monkeypatch, **kw):
+    """`ileti_gonder`'i sahte Telegram ile çalıştırır, giden METNİ döner."""
+    import asyncio
+
+    import telegram_bot
+
+    ileti = svc.olustur(db, SAHIP, "Öteki", kw.pop("mesaj", "merhaba"), None, now=_an(), **kw)
+    db.commit()   # kullanici_getir kendi bağlantısını açıyor
+
+    giden = []
+
+    async def sahte_gonder(text, chat_id=None, **_):
+        giden.append(text)
+        return {"ok": True}
+
+    monkeypatch.setattr(telegram_bot, "send_message", sahte_gonder)
+    assert asyncio.run(telegram_bot.ileti_gonder(dict(ileti))) is True
+    return giden[0]
+
+
+def test_imzali_kaynagi_gosteriyor(db, monkeypatch):
+    metin = _gonder(db, monkeypatch, mesaj="geç kalacağım")
+
+    assert "Test" in metin                    # gönderenin adı
+    assert "iletmemi istedi" in metin
+    assert "geç kalacağım" in metin
+
+
+def test_imzasiz_kaynagi_gostermiyor(db, monkeypatch):
+    """İstenen özellik bu: mesaj asistanın kendi cümlesi gibi görünmeli."""
+    metin = _gonder(db, monkeypatch, mesaj="şemsiyenizi alın", imzasiz=True)
+
+    assert "Test" not in metin                # gönderenin adı GEÇMEMELİ
+    assert "iletmemi istedi" not in metin
+    assert "şemsiyenizi alın" in metin
+
+
+def test_ileti_alicinin_baglamina_yaziliyor(db, monkeypatch):
+    """Alıcı «neden böyle dedin?» diye cevap verirse asistan neden
+    bahsedildiğini bilmeli — yoksa mesajın hiçbir izi kalmıyor."""
+    from database import get_conversation
+
+    _gonder(db, monkeypatch, mesaj="şemsiyenizi alın", imzasiz=True)
+
+    gecmis = get_conversation("222")          # Öteki'nin chat_id'si
+    assert gecmis and "şemsiyenizi alın" in gecmis[-1]["metin"]
+
+
+def test_metin_kacisi_iki_kipte_de_yapiliyor(db, monkeypatch):
+    """Kaçırılmamış bir `<` Telegram'da 400 döndürüp mesajı komple yutar."""
+    for kw in ({}, {"imzasiz": True}):
+        metin = _gonder(db, monkeypatch, mesaj="3 < 5 & doğru", **kw)
+        assert "&lt;" in metin and "&amp;" in metin
 
 
 def test_temizlik_gonderilmisi_ve_bayati_siliyor(db):

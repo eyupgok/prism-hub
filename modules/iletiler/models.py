@@ -15,6 +15,18 @@ Yapısı takibe benziyor (tek seferlik, zamanı gelince gönderilir, bir kez
 gönderilir) ama sahibi ters: kaydı **gönderen** oluşturuyor, mesaj **alıcının**
 sohbetine düşüyor.
 
+## İki kip: imzalı ve imzasız
+
+| | `imzasiz = 0` (varsayılan) | `imzasiz = 1` |
+|---|---|---|
+| Alıcı ne görür | "Eyüp Bey şunu iletmemi istedi, efendim: «...»" | asistanın kendi cümlesi |
+| Kaynak | görünür | görünmez |
+| Ne zaman | "Zeynep'e şunu söyle" | "kendi ağzından söyle", "benden geldiğini belli etme" |
+
+⚠️ **Varsayılan imzalı ve şüphe imzalıdan yana çözülür.** Kaynağı boş yere
+göstermek geri alınabilir bir fazlalık; göstermemek geri alınamaz. Kural
+`ai_router` yönergesinde de açıkça yazılı.
+
 ## Sahiplik burada neden farklı
 
 Projenin her yerinde `owner_id` "bu kayıt kimin" demek. Burada iki taraf var
@@ -49,6 +61,7 @@ def create_iletiler_table(conn: sqlite3.Connection):
             mesaj          TEXT    NOT NULL,
             iletilecek_at  TEXT    NOT NULL,
             iletildi_at    TEXT,
+            imzasiz        INTEGER NOT NULL DEFAULT 0,
             created_at     TEXT    NOT NULL
         )
     """)
@@ -56,3 +69,16 @@ def create_iletiler_table(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_ileti_bekleyen "
         "ON iletiler(iletilecek_at) WHERE iletildi_at IS NULL"
     )
+    _migrate_imzasiz(conn)
+
+
+def _migrate_imzasiz(conn: sqlite3.Connection):
+    """İletinin kaynağı görünsün mü (idempotent).
+
+    ⚠️ **DEFAULT 0 = imzalı**, yani eski kayıtlar ve belirsiz her durum
+    kaynağı GÖSTEREN biçimde gider. Varsayılanın bu yönde olması bilinçli:
+    kaynağı göstermek geri alınabilir bir fazlalık, göstermemek değil.
+    """
+    mevcut = {row["name"] for row in conn.execute("PRAGMA table_info(iletiler)")}
+    if "imzasiz" not in mevcut:
+        conn.execute("ALTER TABLE iletiler ADD COLUMN imzasiz INTEGER NOT NULL DEFAULT 0")

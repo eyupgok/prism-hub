@@ -70,9 +70,25 @@ reminders.update → id(int), title(str opsiyonel), due_datetime(ISO 8601 opsiyo
 reminders.complete → id(int)
 reminders.delete → id(int)
 
-ileti.create → alici(str: kişinin adı), mesaj(str: iletilecek söz, KULLANICININ AĞZINDAN), iletilecek_at(ISO 8601 opsiyonel — vakit söylenmediyse boş bırak, hemen gider)
+ileti.create → alici(str: kişinin adı), mesaj(str: iletilecek söz), iletilecek_at(ISO 8601 opsiyonel — vakit söylenmediyse boş bırak, hemen gider), imzasiz(bool opsiyonel)
 ileti.list → params boş (gönderilmeyi bekleyenler)
 ileti.delete → id(int)
+
+⚠️ İLETİNİN İKİ KİPİ VAR — hangisi olduğunu doğru seçmek şart:
+
+1. **İmzalı (varsayılan, imzasiz yok ya da false).** Alıcı "{adiyla} şunu
+   iletmemi istedi" diye görür, yani sözün sahibi bellidir. `mesaj`
+   KULLANICININ AĞZINDAN yazılır: "Akşam geç kalacağım."
+   Tetikleyen: "Zeynep'e şunu söyle", "ona ilet", "haber ver".
+
+2. **İmzasız (imzasiz: true).** Mesaj SENİN ağzından, kimseye atfedilmeden
+   gider. `mesaj` SENİN cümlen olur — kullanıcının değil: "Efendim,
+   yağmur bekleniyor; şemsiyenizi almayı unutmayın."
+   Yalnız kullanıcı bunu AÇIKÇA isterse: "kendi ağzından söyle",
+   "sen söylemiş gibi yap", "benden geldiğini belli etme", "PRISM olarak de".
+
+⚠️ **Şüphedeysen imzalı gönder.** Kaynağı gereksiz yere göstermek düzeltilebilir
+bir fazlalık; göstermemek geri alınamaz.
 
 notes.create → title(str), content(str), category(iş|kişisel|genel|ders|fikir)
 notes.list → category(str opsiyonel)
@@ -524,19 +540,26 @@ async def _handle_ileti(action: str, params: Dict, owner_id: int) -> str:
                     params.get("alici", ""),
                     params.get("mesaj", ""),
                     params.get("iletilecek_at"),
+                    imzasiz=bool(params.get("imzasiz")),
                 )
             except svc.IletiHatasi as e:
                 return _esc(str(e))
 
             alici_ad = _esc(ileti["alici"]["ad"])
             govde = f"«{_esc(ileti['mesaj'])}»"
+            # ⚠️ Hangi kiple gideceği onayda AÇIKÇA yazıyor. Model iki kipi
+            # karıştırabilir ve ikisinin sonucu bambaşka: biri "Eyüp Bey
+            # iletmemi istedi" der, diğeri demez. Kullanıcı yalnız metni
+            # görseydi yanlış kipi fark etmesinin yolu olmazdı.
+            fiil = "kendi ağzımdan söylüyorum" if ileti["imzasiz"] else "iletiyorum"
             if ileti["hemen"]:
                 # Gönderimi dakikalık iş yapıyor; burada "iletilecek" demek
                 # doğru, "iletildi" demek yalan olurdu.
-                return f"{alici_ad} kişisine birazdan iletiyorum:\n{govde}"
+                return f"{alici_ad} kişisine birazdan {fiil}:\n{govde}"
             an = svc.datetime.fromisoformat(ileti["iletilecek_at"])
+            gelecek = "kendi ağzımdan söyleyeceğim" if ileti["imzasiz"] else "ileteceğim"
             return (
-                f"{an.strftime('%d.%m %H:%M')} — {alici_ad} kişisine ileteceğim:\n"
+                f"{an.strftime('%d.%m %H:%M')} — {alici_ad} kişisine {gelecek}:\n"
                 f"{govde}\n\nVazgeçerseniz: «{ileti['id']} numaralı iletiyi iptal et»"
             )
 
@@ -547,8 +570,11 @@ async def _handle_ileti(action: str, params: Dict, owner_id: int) -> str:
             satirlar = ["<b>Bekleyen iletiler:</b>"]
             for i in bekleyen:
                 an = svc.datetime.fromisoformat(i["iletilecek_at"])
+                # İmzasız olan işaretli: listede ikisi aynı görünseydi
+                # hangisinin kaynağı göstereceği belirsiz kalırdı.
+                kip = " · imzasız" if i["imzasiz"] else ""
                 satirlar.append(
-                    f"[{i['id']}] {an.strftime('%d.%m %H:%M')} → {_esc(i['alici_ad'])}: "
+                    f"[{i['id']}] {an.strftime('%d.%m %H:%M')} → {_esc(i['alici_ad'])}{kip}: "
                     f"«{_esc(i['mesaj'])}»"
                 )
             return "\n".join(satirlar)

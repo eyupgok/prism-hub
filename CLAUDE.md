@@ -141,7 +141,7 @@ modules/
                    gönder → kararı (SUSTUĞU turlar dahil) günlüğe yaz
   iletiler/     → BİR KULLANICIDAN DİĞERİNE SÖZ (ayrıntı → "İletiler")
     models.py   → iletiler tablosu. owner_id YOK: gonderen_id + alici_id,
-                   ikisi de gerçek taraf
+                   ikisi de gerçek taraf. `imzasiz` = kaynak görünsün mü
     service.py  → olustur / bekleyenler / vakti_gelenler / iptal.
                    Engelleri `IletiHatasi` ile bildiriyor, metni doğrudan
                    kullanıcıya gidiyor
@@ -362,7 +362,10 @@ gozlem_durum (owner_id, son_hafiza_conv_id, son_takip_conv_id)
                 İki damga ayrı: biri hata verdiğinde diğerinin de o
                 konuşmaları atlaması gerekmiyor.
 
-iletiler     (id, gonderen_id, alici_id, mesaj, iletilecek_at, iletildi_at, created_at)
+iletiler     (id, gonderen_id, alici_id, mesaj, iletilecek_at, iletildi_at,
+              imzasiz, created_at)
+              → imzasiz = alıcı sözün kaynağını görecek mi. DEFAULT 0 (görecek).
+                Göç: _migrate_imzasiz() → "İletiler / İki kip"
               → "Zeynep'e akşam yedide şunu söyle" → o saatte alıcının
                 Telegram'ına düşen mesaj. Hatırlatıcı DEĞİL (alıcı bunu
                 görev olarak görmemeli, tamamlayamamalı, sabah özetinde
@@ -942,6 +945,41 @@ Alıcıya kendi hitabıyla ("efendim") sesleniliyor, gönderen adıyla anılıyo
 ("Eyüp Bey") — `ai_router.adiyla_hitap()` bu ayrımı zaten biliyor.
 **Selamlama yok** ("Merhaba"): günde birkaç ileti gidince her seferinde
 tekrarlanıp yapmacık duruyor.
+
+### İki kip: imzalı ve imzasız
+
+`iletiler.imzasiz` sütunu, alıcının sözün kaynağını görüp görmeyeceğini
+belirliyor:
+
+| | `imzasiz = 0` (varsayılan) | `imzasiz = 1` |
+|---|---|---|
+| Alıcı ne görür | 💬 "Eyüp Bey şunu iletmemi istedi, efendim: «...»" | 🔹 asistanın kendi cümlesi |
+| `mesaj` kimin ağzından | kullanıcının | asistanın |
+| Tetikleyen söz | "Zeynep'e şunu söyle" | "kendi ağzından söyle", "benden geldiğini belli etme" |
+
+İmzasız kipin işareti (🔹) gözlem katmanınınkiyle **bilerek aynı**: alıcı
+açısından "PRISM kendiliğinden bir şey söyledi" deneyimi tek biçimde kalsın.
+
+⚠️ **Varsayılan imzalı ve şüphe imzalıdan yana çözülür.** Kaynağı gereksiz
+göstermek düzeltilebilir bir fazlalık; göstermemek geri alınamaz. Kural hem
+`_migrate_imzasiz` DEFAULT 0'da hem yönergede açıkça yazılı.
+
+⚠️ **Onay mesajı hangi kip olduğunu SÖYLÜYOR** ("…birazdan iletiyorum" vs
+"…birazdan kendi ağzımdan söylüyorum"). Model iki kipi karıştırabilir ve
+sonuçları bambaşka; kullanıcı yalnız metni görseydi yanlış kipi fark
+etmesinin yolu olmazdı.
+
+⚠️ **Gönderilen ileti alıcının konuşma bağlamına yazılıyor**
+(`telegram_bot._ileti_baglama_yaz`). Olmasaydı alıcı "neden böyle dedin?"
+diye cevap verdiğinde asistanın hiçbir fikri olmazdı — mesaj
+`conversations`'a hiç girmemiş olurdu. `content` bilerek JSON biçiminde:
+modele giden bağlamda asistan satırları hep öyle, düz cümle koymak modeli
+JSON üretmekten caydırabilirdi.
+**Sonucu:** imzasız kipte asistan o cümleyi kendi söylemiş sayar ve
+sorulursa bir gerekçe uydurur.
+
+⚠️ Gözlem katmanı kendi mesajlarını `conversations`'a YAZMIYOR — aynı boşluk
+orada duruyor, ayrı bir iş.
 
 ### Neden kendi tablosu
 

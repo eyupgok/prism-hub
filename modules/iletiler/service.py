@@ -57,8 +57,13 @@ def olustur(
     mesaj: str,
     iletilecek_at: Optional[str] = None,
     now: Optional[datetime] = None,
+    imzasiz: bool = False,
 ) -> Dict[str, Any]:
-    """İleti kaydeder. Engellerde `IletiHatasi` fırlatır — sebebi kullanıcıya gider."""
+    """İleti kaydeder. Engellerde `IletiHatasi` fırlatır — sebebi kullanıcıya gider.
+
+    `imzasiz=True` ise mesaj alıcıya kaynağı gösterilmeden, asistanın kendi
+    cümlesi gibi gider. ⚠️ Varsayılanın False olması bilinçli → models.py.
+    """
     now = now or datetime.now(TZ)
     mesaj = (mesaj or "").strip()
 
@@ -94,9 +99,9 @@ def olustur(
     an = _zaman_coz(iletilecek_at, now)
 
     cursor = conn.execute(
-        "INSERT INTO iletiler (gonderen_id, alici_id, mesaj, iletilecek_at, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (gonderen_id, alici["id"], mesaj, an.isoformat(), now.isoformat()),
+        "INSERT INTO iletiler (gonderen_id, alici_id, mesaj, iletilecek_at, imzasiz, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (gonderen_id, alici["id"], mesaj, an.isoformat(), int(bool(imzasiz)), now.isoformat()),
     )
     kayit = dict(conn.execute(
         "SELECT * FROM iletiler WHERE id = ?", (cursor.lastrowid,)

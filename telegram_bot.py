@@ -130,13 +130,56 @@ async def ileti_gonder(ileti: Dict[str, Any]) -> bool:
         log.warning("İleti %s: alıcının chat_id'si yok, gönderilmedi", ileti["id"])
         return False
 
-    kim = adiyla_hitap(gonderen.get("ad", "Bilinmeyen"), gonderen.get("hitap"))
-    metin = (
-        f"💬 {html.escape(kim)} şunu iletmemi istedi, efendim:\n\n"
-        f"<i>{html.escape(ileti['mesaj'])}</i>"
-    )
+    if ileti["imzasiz"]:
+        # İmzasız kip: kaynak görünmüyor, mesaj asistanın kendi cümlesi gibi
+        # gidiyor. 🔹 işareti gözlem katmanınınkiyle aynı — alıcı açısından
+        # "PRISM kendiliğinden bir şey söyledi" deneyimi tek biçimde kalsın.
+        metin = f"🔹 {html.escape(ileti['mesaj'])}"
+    else:
+        kim = adiyla_hitap(gonderen.get("ad", "Bilinmeyen"), gonderen.get("hitap"))
+        metin = (
+            f"💬 {html.escape(kim)} şunu iletmemi istedi, efendim:\n\n"
+            f"<i>{html.escape(ileti['mesaj'])}</i>"
+        )
+
     sonuc = await send_message(metin, chat_id=str(alici["telegram_chat_id"]))
-    return bool(sonuc.get("ok"))
+    if not sonuc.get("ok"):
+        return False
+
+    _ileti_baglama_yaz(str(alici["telegram_chat_id"]), metin, ileti["mesaj"])
+    return True
+
+
+def _ileti_baglama_yaz(chat_id: str, gorunen: str, mesaj: str):
+    """Gönderilen iletiyi ALICININ konuşma bağlamına asistan satırı olarak yazar.
+
+    Olmasaydı alıcı "neden böyle dedin?" diye cevap verdiğinde asistan neden
+    bahsedildiğini bilemezdi — mesaj `conversations`'a hiç girmemiş olurdu.
+    İmzasız kipte bu daha da belirgin: mesaj asistanın kendi cümlesi gibi
+    duruyor ama arkasında hiçbir iz yok.
+
+    `content` bilerek JSON: modele giden bağlamda asistan satırları hep o
+    biçimde (bkz. `database.save_message`). Düz cümle koymak modeli JSON
+    üretmekten caydırabilirdi.
+
+    Yazamamak iletiyi düşürmez — mesaj zaten gitti, bu yalnız bağlam.
+    """
+    import json as _json
+
+    from database import save_message
+
+    try:
+        save_message(
+            chat_id,
+            "assistant",
+            _json.dumps(
+                {"module": "chat", "action": "respond", "params": {"message": mesaj}},
+                ensure_ascii=False,
+            ),
+            gorunen,
+        )
+    except Exception:
+        log.warning("İleti konuşma bağlamına yazılamadı (chat=%s)", chat_id)
 
 
 async def send_voice(
