@@ -64,6 +64,24 @@ def sohbet_kovasi(user: dict) -> str:
     return f"panel:{user['id']}"
 
 
+@router.get("/gecmis")
+async def gecmis(user: dict = Depends(verify_api_key)):
+    """Panelin sohbet geçmişi — sayfa yenilenince baloncuklar kaybolmasın diye.
+
+    ⚠️ Yalnız PANEL kovası (`panel:<id>`). Telegram'daki konuşma buraya
+    karışmıyor: iki kanal ayrı bağlam ve modele de ayrı veriliyor
+    (bkz. `sohbet_kovasi`). Ekranda birleştirseydik asistanın hatırladığı
+    şeyle kullanıcının gördüğü şey ayrışırdı — "ekranda duruyor, neden
+    hatırlamıyor?" sorusu.
+
+    ⚠️ `conversations` her gece 30 günlük temizlikten geçiyor; geçmiş o
+    kadar geriye gider.
+    """
+    from database import get_conversation
+
+    return {"mesajlar": get_conversation(sohbet_kovasi(user))}
+
+
 @router.post("/")
 async def chat(data: ChatMessage, user: dict = Depends(verify_api_key)):
     """Doğal dil mesajını AI router'a iletir (mobil/web istemciler için).
@@ -193,7 +211,9 @@ async def chat_voice(
     if not text:
         raise HTTPException(status_code=400, detail="Seste anlaşılır konuşma bulunamadı")
 
-    response = await route_message(text, sohbet_kovasi(user), user["id"])
+    # Geçmişte 🎤 ile duruyor: sayfa yenilenince "bunu yazmış mıydım, söylemiş
+    # miydim" sorusu kalmasın. Modele giden metin dökümün kendisi.
+    response = await route_message(text, sohbet_kovasi(user), user["id"], f"🎤 {text}")
     return {"transcript": text, "response": response}
 
 
@@ -226,5 +246,8 @@ async def chat_image(
         raise HTTPException(status_code=502, detail=f"Görsel analizi başarısız: {e}")
 
     text = f"{hint}\n\n[Görsel analizi]: {description}" if hint else f"[Görsel analizi]: {description}"
-    response = await route_message(text, sohbet_kovasi(user), user["id"])
+    # Ekranda kullanıcının kendi cümlesi durmalı; analiz metni modele ait.
+    response = await route_message(
+        text, sohbet_kovasi(user), user["id"], f"🖼 {hint}" if hint else "🖼 Görsel"
+    )
     return {"description": description, "response": response}

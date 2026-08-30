@@ -92,7 +92,8 @@ modules/
     service.py  → Groq Whisper transkripsiyon + describe_image() vision analizi
                    (Telegram + REST ortak kullanır)
     routes.py   → POST /api/chat (metin), /api/chat/voice (ses → metin),
-                   /api/chat/image (görsel), /api/chat/ses (metin → ses, MP3)
+                   /api/chat/image (görsel), /api/chat/ses (metin → ses, MP3),
+                   GET /api/chat/gecmis (panelin okunur sohbet geçmişi)
   reminders/
     models.py   → CREATE TABLE reminders (id, title, due_datetime, priority,
                    is_completed, last_notified_at, snooze_count, recurrence, created_at)
@@ -165,8 +166,11 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
                        "Bütçe" sekmesi (components/BudgetPanel.jsx). Limit koymak
                        harcamaya bakarken akla gelen bir iş, menüde ayrı durunca
                        kopuk kalıyordu.
-                       Sohbet.jsx → panelden AI sohbeti (metin + görsel). iPhone'da
-                       Telegram dışında da asistana ulaşılabilsin diye eklendi.
+                       Sohbet.jsx → panelden AI sohbeti (metin + görsel + ses).
+                       iPhone'da Telegram dışında da asistana ulaşılabilsin diye
+                       eklendi. Geçmiş sunucudan geliyor → "Panel Sohbeti".
+  src/sesKaydi.js    → Tarayıcıdan sesli mesaj kaydı (MediaRecorder).
+                       Biçim seçimi + mikrofonu bırakma burada → "Panel Sohbeti".
   src/components/SesAyari.jsx
                      → Ayarlar'daki ses bölümü: ses seçimi, sakinlik/hız
                        kaydırıcıları, Önizle, kalan kota
@@ -360,11 +364,16 @@ iletiler     (id, gonderen_id, alici_id, mesaj, iletilecek_at, iletildi_at, crea
                 `gonderen_id` iptal hakkı kimde, `alici_id` mesaj kime.
               → INDEX: idx_ileti_bekleyen(iletilecek_at) WHERE iletildi_at IS NULL
 
-conversations (id, chat_id, role[user|assistant], content, created_at)
+conversations (id, chat_id, role[user|assistant], content, gorunen, created_at)
               → INDEX: idx_conv_chat(chat_id)
               → owner_id YOK, bilerek: bu tablo sadece Groq'a bağlam vermek için
                 okunuyor ve zaten chat_id'ye göre süzülüyor. Telegram'da chat_id
                 kişiye özel, panelde `panel:<kullanıcı id>` — bağlamlar en baştan ayrı.
+              → **content = MODELİN gördüğü, gorunen = İNSANIN gördüğü.**
+                Asistan satırında content ham JSON komut (model bir sonraki turda
+                kendi çıktı biçimini görmeli), gorunen ise cevabın kendisi.
+                NULL = ikisi aynı (düz yazılan kullanıcı mesajı).
+                Göç: _migrate_gorunen(), idempotent ALTER TABLE → "Panel Sohbeti"
 ```
 
 **owner_id sütunları sonradan eklendi.** `modules/auth/models.py:sahiplik_sutunu_ekle()`
@@ -719,7 +728,9 @@ anlamanın yolu yok.
 3. `parse_message(user_message, history)` → Groq'a system prompt + geçmiş + mesaj gönderilir
 4. Groq saf JSON döner: `{"module": "...", "action": "...", "params": {...}}`
 5. `dispatch(parsed)` → ilgili `_handle_*` fonksiyonuna yönlendirir
-6. Kullanıcı mesajı ve Groq'un JSON yanıtı `conversations` tablosuna kaydedilir
+6. Kullanıcı mesajı ve Groq'un JSON yanıtı `conversations` tablosuna kaydedilir.
+   Yanıt metni ayrıca `gorunen` sütununa yazılır — paneldeki sohbet geçmişi
+   ondan çiziliyor (`route_message`'ın `gorunen` parametresi → "Panel Sohbeti")
 
 **Çoklu komut:** Tek mesajda birden fazla iş varsa Groq `{"commands": [ {...}, {...} ]}`
 döndürür; `dispatch()` diziyi görürse hepsini sırayla çalıştırıp yanıtları birleştirir
@@ -1069,6 +1080,68 @@ Elenirse ANLAM kaybedenler ise çevriliyor, atılmıyor: `°C` → "derece",
 Uzun metin sırayla cümle sonundan, olmazsa kelime sonundan kesiliyor —
 `AZAMI_KARAKTER` (1200). Kelime yedeği şart: madde madde yazılmış bir özette
 ilk yarıda hiç nokta olmayabiliyor ve yarım hece okunuyordu.
+
+## Panel Sohbeti
+
+Panelin `Sohbet` sayfası artık Telegram gibi davranıyor: geçmiş sayfa
+yenilenince kaybolmuyor, sesli mesaj atılabiliyor. Başlık **PRISM** —
+"Sohbet" yazınca kiminle konuşulduğu belli olmuyordu.
+
+### İki metin, iki okur kitle
+
+Geçmişi gösterebilmenin önündeki tek engel şuydu: `conversations` tablosunda
+asistan satırı **ham JSON komut** tutuyor, çünkü model bir sonraki turda kendi
+çıktı biçimini görmek zorunda. Ekrana `{"module": "reminders", ...}` basılamaz,
+modele de formatlanmış metin verilemez. Çözüm ikinci bir sütun:
+
+| Sütun | Kim okur | Asistan satırında ne var |
+|---|---|---|
+| `content` | model (`get_recent_messages`) | `{"module": "reminders", ...}` |
+| `gorunen` | insan (`get_conversation`) | "Kaydedildi, efendim." |
+
+`gorunen` NULL ise ikisi aynı demektir — düz yazılan kullanıcı mesajı gibi.
+Farklı olduğu yerler: sesli mesajda döküm `🎤` ile, görselde kullanıcının
+kendi cümlesi `🖼` ile giriyor (`user_message` orada baştan aşağı
+`[Görsel analizi]: ...` bloğu — onu kullanıcının cümlesi diye ekrana basmak
+yanlış olurdu).
+
+⚠️ **Sütun eklenmeden önce yazılmış asistan satırları panelde GÖRÜNMEZ.**
+`get_conversation()` `gorunen`i boş olan asistan satırını eliyor: ham JSON
+göstermektense hiç göstermemek doğru. Kullanıcı satırları eskiden de okunur
+olduğu için onlar `content`'ten çiziliyor.
+
+### Telegram geçmişi panele karışmıyor
+
+`GET /api/chat/gecmis` yalnız `panel:<id>` kovasını veriyor. Birleştirmek
+görsel olarak daha zengin olurdu ama **asistanın hatırladığı şeyle
+kullanıcının gördüğü şey ayrışırdı**: Telegram'da söylenen bir cümle ekranda
+dururken model onu bağlam olarak almıyor ("ekranda duruyor, neden
+hatırlamıyor?"). Kanallar arası süreklilik zaten hafıza katmanında var
+(`hafiza` tablosu kanaldan bağımsız).
+
+⚠️ Geçmiş **30 günlük** — `conversations` her gece 03:00'te temizleniyor.
+
+### Sesli mesaj (`frontend/src/sesKaydi.js`)
+
+Kayıt tarayıcıda (`MediaRecorder`), döküm sunucuda (`/api/chat/voice` →
+Groq Whisper). Panelin kendi ses tanıması yok; Telegram'la aynı motor.
+
+⚠️ **Uzantı önemli.** Chrome `audio/webm`, Safari (iPhone dahil) `audio/mp4`
+üretiyor; Groq ikisini de kabul ediyor ama **dosya adının uzantısına** bakıyor.
+`BICIMLER` listesi biçimle uzantıyı birlikte tutuyor, `isTypeSupported`
+hiç yoksa Safari varsayılanına (`.m4a`) düşülüyor.
+
+⚠️ **Kayıt bitince `stream.getTracks()` MUTLAKA durdurulmalı.** Durdurulmazsa
+sekmedeki kırmızı kayıt göstergesi yanık kalır ve kullanıcı dinlendiğini sanar.
+Sayfadan çıkışta da (`useEffect` temizliği) aynı şey yapılıyor.
+
+⚠️ `navigator.mediaDevices` **güvenli bağlam** ister. Panel HTTPS'te ama yerel
+ağdan düz http ile açılırsa tanımsız gelir — `sesKaydiDestekli()` o durumda
+düğmeyi hiç çizmiyor. Mikrofon düğmesi ayrıca yazı alanı boşken görünür:
+yazarken gönder düğmesinin yerini alıp yanlış tuşa bastırıyordu.
+
+Açık unutulmuş mikrofona karşı üst sınır `AZAMI_SANIYE` (120) — süre dolunca
+kayıt kendiliğinden gönderilir.
 
 ## Zamanlayıcı (scheduler.py)
 

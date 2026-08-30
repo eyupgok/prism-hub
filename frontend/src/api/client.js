@@ -60,6 +60,29 @@ async function request(path, options = {}) {
   return res.json()
 }
 
+/**
+ * Dosya yükleyen uçlar için ortak gönderim.
+ *
+ * `request()` kullanılamıyor: gövde FormData olduğunda Content-Type'ı tarayıcı
+ * koymalı (sınır dizesini o üretiyor). Oturum düşmesini burada da yakalıyoruz,
+ * yoksa süresi dolmuş çerezle ses gönderince kullanıcı giriş ekranına
+ * atılmak yerine anlamsız bir hata görürdü.
+ */
+async function dosyaGonder(path, formData) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST', credentials: 'same-origin', body: formData,
+  })
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
+    throw new AuthError()
+  }
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}))
+    throw new Error(e.detail || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export const api = {
   // ── Oturum ──────────────────────────────────────────────────────────────
   me: () => request('/api/auth/me'),
@@ -117,18 +140,21 @@ export const api = {
   // (sınır dizesini o üretiyor) — bu yüzden request() değil doğrudan fetch.
   sohbet: (message) =>
     request('/api/chat/', { method: 'POST', body: JSON.stringify({ message }) }),
+  // ⚠️ `?kisi=` EKLENMİYOR (kisiEkle bunu GET'e ekler ama sunucu yok sayar):
+  // sohbet her zaman giriş yapanın kendi kovasından okunur.
+  sohbetGecmisi: () => request('/api/chat/gecmis'),
   sohbetGorsel: async (dosya, message = '') => {
     const fd = new FormData()
     fd.append('file', dosya)
     fd.append('message', message)
-    const res = await fetch(`${BASE_URL}/api/chat/image`, {
-      method: 'POST', credentials: 'same-origin', body: fd,
-    })
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({}))
-      throw new Error(e.detail || `HTTP ${res.status}`)
-    }
-    return res.json()
+    return dosyaGonder('/api/chat/image', fd)
+  },
+  // Panelden sesli mesaj: tarayıcının kaydettiği parça olduğu gibi gidiyor,
+  // sunucuda Whisper metne çeviriyor. Uzantı önemli — Groq dosya adına bakıyor.
+  sohbetSes: async (blob, dosyaAdi = 'kayit.webm') => {
+    const fd = new FormData()
+    fd.append('file', blob, dosyaAdi)
+    return dosyaGonder('/api/chat/voice', fd)
   },
 
   // Seslendirme: gövde JSON değil ses dosyası, o yüzden request() değil fetch.

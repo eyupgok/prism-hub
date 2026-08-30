@@ -807,12 +807,22 @@ def _hafiza(owner_id: int) -> str:
         return ""
 
 
-async def route_message(user_message: str, chat_id: str = "", owner_id: int = None) -> str:
+async def route_message(
+    user_message: str,
+    chat_id: str = "",
+    owner_id: int = None,
+    gorunen: str = None,
+) -> str:
     """Ana giriş: mesajı Groq'a gönderir, modüle yönlendirir, cevabı döner.
 
     `owner_id` verilmezse chat_id'den çözülür — Telegram tarafı zaten kullanıcıyı
     bulup geçiriyor, ama REST/panel yolu chat_id ile geliyor. İkisi de bulunamazsa
     istek reddedilir: sahipsiz bir komutun kimin verisine yazacağı belirsizdir.
+
+    `gorunen`: kullanıcının EKRANDA gördüğü hâli, `user_message`'tan farklıysa.
+    Sesli mesajda dökümün önüne 🎤 giriyor, görselde ise `user_message`
+    baştan aşağı `[Görsel analizi]: ...` bloğu — o metni sohbet geçmişine
+    kullanıcının cümlesi diye basmak yanlış olurdu.
     """
     from auth import kullanici_chat_id_ile, kullanici_getir
     from database import save_message, get_recent_messages
@@ -836,8 +846,12 @@ async def route_message(user_message: str, chat_id: str = "", owner_id: int = No
         response = await dispatch(parsed, owner_id)
 
         if chat_id:
-            save_message(chat_id, "user", user_message)
-            save_message(chat_id, "assistant", json.dumps(parsed, ensure_ascii=False))
+            save_message(chat_id, "user", user_message, gorunen)
+            # Asistan satırında iki metin birden: modele ham JSON, panele cevabın
+            # kendisi. Tek sütun olsaydı biri diğerini bozardı.
+            save_message(
+                chat_id, "assistant", json.dumps(parsed, ensure_ascii=False), response
+            )
 
         return response
     except json.JSONDecodeError:

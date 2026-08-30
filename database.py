@@ -39,18 +39,34 @@ def get_db():
         conn.close()
 
 
-def save_message(chat_id: str, role: str, content: str):
-    """Konuşma geçmişine mesaj ekler"""
+def save_message(chat_id: str, role: str, content: str, gorunen: str = None):
+    """Konuşma geçmişine mesaj ekler.
+
+    İki sütun, iki ayrı okur kitle:
+
+    - `content` → **modelin gördüğü**. Asistan tarafında bu ham JSON komut
+      (`{"module": "reminders", ...}`); modelin bir sonraki turda kendi
+      çıktı biçimini görmesi gerekiyor.
+    - `gorunen` → **insanın gördüğü**. NULL ise ikisi aynı demektir
+      (kullanıcının düz yazdığı mesaj gibi).
+
+    Ayrım panelde sohbet geçmişini gösterebilmek için açıldı: ekrana ham
+    JSON basılamaz, ama modele de formatlanmış metin verilemez.
+    """
     now = datetime.now(_TZ).isoformat()
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO conversations (chat_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (chat_id, role, content, now),
+            "INSERT INTO conversations (chat_id, role, content, gorunen, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (chat_id, role, content, gorunen, now),
         )
 
 
 def get_recent_messages(chat_id: str, limit: int = 10) -> List[Dict]:
-    """Son N mesajı kronolojik sırada döner"""
+    """Son N mesajı kronolojik sırada döner — MODELE bağlam olarak gider.
+
+    Bilerek `gorunen`'e bakmıyor: model kendi ürettiği JSON'u görmeli.
+    """
     with get_db() as conn:
         rows = conn.execute(
             "SELECT role, content FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT ?",
@@ -59,12 +75,47 @@ def get_recent_messages(chat_id: str, limit: int = 10) -> List[Dict]:
     return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
 
+def get_conversation(chat_id: str, limit: int = 60) -> List[Dict]:
+    """Panelde gösterilecek okunur geçmiş — EKRANA gider.
+
+    `gorunen` yoksa `content`'e düşer; eski kayıtlarda (sütun eklenmeden önce
+    yazılanlar) asistan satırı ham JSON olduğu için ELENİR. Kullanıcıya
+    `{"module": ...}` göstermektense o satırı hiç göstermemek daha iyi.
+    """
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT role, content, gorunen, created_at FROM conversations "
+            "WHERE chat_id = ? ORDER BY id DESC LIMIT ?",
+            (chat_id, limit),
+        ).fetchall()
+
+    gecmis = []
+    for r in reversed(rows):
+        metin = r["gorunen"] or r["content"]
+        if r["role"] == "assistant" and not r["gorunen"]:
+            continue
+        gecmis.append({"role": r["role"], "metin": metin, "created_at": r["created_at"]})
+    return gecmis
+
+
 def delete_old_conversations(days: int = 30) -> int:
     """Belirtilen günden eski konuşma kayıtlarını siler, silinen satır sayısını döner"""
     cutoff = (datetime.now(_TZ) - timedelta(days=days)).isoformat()
     with get_db() as conn:
         cursor = conn.execute("DELETE FROM conversations WHERE created_at < ?", (cutoff,))
         return cursor.rowcount
+
+
+def _migrate_gorunen(conn: sqlite3.Connection):
+    """Konuşmanın insan tarafı (idempotent).
+
+    Sütun sonradan eklendi: eski satırlarda NULL kalır, yani eski asistan
+    yanıtları panelde görünmez (ham JSON'du). Kullanıcı mesajları eskiden de
+    okunur olduğu için onlar `content`'ten çiziliyor.
+    """
+    mevcut = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
+    if "gorunen" not in mevcut:
+        conn.execute("ALTER TABLE conversations ADD COLUMN gorunen TEXT")
 
 
 def init_db():
@@ -96,9 +147,11 @@ def init_db():
                 chat_id    TEXT    NOT NULL,
                 role       TEXT    NOT NULL,
                 content    TEXT    NOT NULL,
+                gorunen    TEXT,
                 created_at TEXT    NOT NULL
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_chat ON conversations(chat_id)")
+        _migrate_gorunen(conn)
 
     log.info("✅ Veritabanı başlatıldı")

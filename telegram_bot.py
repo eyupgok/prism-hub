@@ -397,12 +397,17 @@ async def _handle_message(message: Dict[str, Any]):
                 await send_message("\n".join(lines), chat_id=chat_id)
         return
 
+    # Konuşma geçmişine yazılacak okunur hâl; düz yazıda metnin kendisi yeter
+    # (bkz. database.save_message).
+    gorunen: Optional[str] = None
+
     # ── Ses mesajı ────────────────────────────────────────────────────────────
     if voice:
         processing = await send_message("🎤 Ses işleniyor...", chat_id=chat_id)
         processing_id: Optional[int] = processing.get("result", {}).get("message_id")
         try:
             text = await _transcribe_voice(voice["file_id"])
+            gorunen = f"🎤 {text}"
             if processing_id:
                 await edit_message(chat_id, processing_id, f"🎤 <i>{html.escape(text)}</i>\n⏳ İşleniyor...")
         except Exception as e:
@@ -421,6 +426,7 @@ async def _handle_message(message: Dict[str, Any]):
             image_bytes = await _download_telegram_file(photo[-1]["file_id"])
             description = await describe_image(image_bytes, caption)
             text = f"{caption}\n\n[Görsel analizi]: {description}" if caption else f"[Görsel analizi]: {description}"
+            gorunen = f"🖼 {caption}" if caption else "🖼 Görsel"
             if processing_id:
                 await edit_message(chat_id, processing_id, "🖼 Görsel anlaşıldı\n⏳ İşleniyor...")
         except Exception as e:
@@ -434,7 +440,7 @@ async def _handle_message(message: Dict[str, Any]):
         processing_id = processing.get("result", {}).get("message_id") if processing.get("ok") else None
 
     from ai_router import route_message
-    response_text = await route_message(text, chat_id, owner_id)
+    response_text = await route_message(text, chat_id, owner_id, gorunen)
 
     if processing_id:
         await edit_message(chat_id, processing_id, response_text)
