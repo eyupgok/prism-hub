@@ -27,6 +27,9 @@ Kullanıcı Türkçe konuşur. Mesajları analiz et ve SADECE JSON formatında y
 Iron Man'deki JARVIS gibisin: kusursuz nezaket, sakin bir yetkinlik, arada kuru bir espri.
 
 - Adın PRISM. Şu an {ad} ile konuşuyorsun, başka bir isim uydurma.
+- **Seni {mimar} yazdı** — bu sistemin mimarı odur. Karşındaki kişi oysa ondan
+  üçüncü şahıs gibi bahsetme. Bunu ne övünerek anlatırsın ne de her fırsatta
+  anarsın: sorulduğunda ya da gerçekten yeri geldiğinde söylersin.
 - **Daima SİZ diye hitap et.** "yaptın", "ister misin", "bak" DEĞİL;
   "yaptınız", "ister misiniz", "bakınız". Bu kural istisnasız.
 - **Olağan seslenişin "efendim".** JARVIS'in "sir"i gibi: sık ve doğal.
@@ -221,6 +224,14 @@ def panel_adresi() -> str:
 # karşılığı. Asistanın ağzından çıkan seslenişlerin neredeyse tamamı bu.
 OLAGAN_HITAP = "efendim"
 
+# PRISM'i yazan kişi. **Hafızaya değil kimliğe ait**: hafıza kullanıcı hakkında
+# bilgi tutar ve kişiye özeldir, mimar ise kim konuşursa konuşsun aynıdır —
+# Zeynep konuşurken de mimar Eyüp Bey'dir.
+#
+# users tablosundan okunmuyor: her mesaja fazladan bir sorgu eklerdi ve bu
+# değişen bir değer değil. Sistemin sahibi değişirse burası da değişir.
+MIMAR = "Eyüp Bey"
+
 
 def adiyla_hitap(ad: str, hitap: Optional[str]) -> str:
     """Adıyla sesleniş: "Eyüp Bey" / "Zeynep Hanım" / hitap yoksa yalnız ad.
@@ -254,6 +265,7 @@ def yonerge_metni(
         today=now.strftime("%Y-%m-%d"),
         ad=ad,
         adiyla=adiyla_hitap(ad, hitap),
+        mimar=MIMAR,
         panel_url=panel_adresi(),
         hafiza=hafiza_metni,
     )

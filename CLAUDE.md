@@ -457,6 +457,12 @@ samimi kalıpları kelime sınırıyla arayıp yakalıyor.
 "sir"inin karşılığı (`ai_router.OLAGAN_HITAP`). Asistanın ağzından çıkan
 seslenişlerin neredeyse tamamı bu.
 
+**Mimarını bilir:** `ai_router.MIMAR` ("Eyüp Bey") yönergeye `{mimar}` ile
+giriyor. ⚠️ Bu **hafızaya değil KİMLİĞE** ait — hafıza kullanıcı hakkında bilgi
+tutar ve kişiye özeldir (`owner_id`), mimar ise kim konuşursa konuşsun aynıdır.
+Zeynep konuşurken de PRISM'i yazan kişi Eyüp Bey. `users` tablosundan
+okunmuyor: her mesaja fazladan bir sorgu eklerdi ve değişen bir değer değil.
+
 **Adıyla seslenmek istisna:** `users.hitap` ("Bey" / "Hanım") →
 `ai_router.adiyla_hitap()` → "Eyüp Bey". Yönergeye `{adiyla}` yer tutucusuyla
 giriyor ve orada **"istisnadır, vurgu gerektiğinde"** diye işaretli. Her

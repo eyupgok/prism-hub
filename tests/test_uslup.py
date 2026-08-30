@@ -41,6 +41,28 @@ def test_hitap_yonergeye_giriyor():
     assert "SİZ diye hitap et" in yonerge
 
 
+# ── Kimlik ───────────────────────────────────────────────────────────────────
+
+def test_mimar_kim_konusursa_konussun_ayni():
+    """Mimar hafızaya değil KİMLİĞE ait: hafıza kişiye özel, mimar değil.
+    Zeynep konuşurken de PRISM'i yazan kişi Eyüp Bey."""
+    for ad, hitap in (("Eyüp", "Bey"), ("Zeynep", "Hanım")):
+        yonerge = ai_router.yonerge_metni(ad, hitap)
+        assert ai_router.MIMAR in yonerge
+        assert "mimarı odur" in yonerge
+
+
+def test_yonergede_doldurulmamis_yer_tutucu_kalmiyor():
+    """⚠️ Yönergeye yeni bir {alan} eklenip `yonerge_metni`'ne konmazsa
+    `format()` KeyError atar ve HER mesaj düşer. Bu test onu erken yakalar;
+    süslü parantez yalnız JSON örneklerinde ({{...}}) kalmalı."""
+    yonerge = ai_router.yonerge_metni("Eyüp", "Bey")
+
+    import re
+    kalan = re.findall(r"\{[a-zçğıöşü_]+\}", yonerge)
+    assert kalan == [], f"doldurulmamış yer tutucu: {kalan}"
+
+
 def test_hitap_kullanicidan_okunuyor(db):
     """Sütun sonradan eklendi; göç çalışmazsa hitap sessizce kaybolurdu."""
     db.execute("UPDATE users SET hitap = 'Bey' WHERE id = ?", (SAHIP,))
