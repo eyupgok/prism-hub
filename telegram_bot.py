@@ -110,6 +110,35 @@ async def send_document(
         return resp.json()
 
 
+async def ileti_gonder(ileti: Dict[str, Any]) -> bool:
+    """Bir kullanıcının diğerine yolladığı sözü, asistanın ağzından iletir.
+
+    Mesaj alıcının kendi hitabıyla ("efendim") açılıyor, gönderen ise adıyla
+    anılıyor ("Eyüp Bey") — `ai_router.adiyla_hitap()` zaten bu ayrımı
+    biliyor. Selamlama YOK: günde birkaç ileti gidince "Merhaba" her seferinde
+    tekrarlanıp yapmacık duruyor.
+
+    Metin `html.escape`'ten geçiyor: içerik doğrudan kullanıcıdan geliyor ve
+    kaçırılmamış bir `<` mesajı 400 ile sessizce yutardı.
+    """
+    from ai_router import adiyla_hitap
+    from auth import kullanici_getir
+
+    gonderen = kullanici_getir(ileti["gonderen_id"]) or {}
+    alici = kullanici_getir(ileti["alici_id"]) or {}
+    if not alici.get("telegram_chat_id"):
+        log.warning("İleti %s: alıcının chat_id'si yok, gönderilmedi", ileti["id"])
+        return False
+
+    kim = adiyla_hitap(gonderen.get("ad", "Bilinmeyen"), gonderen.get("hitap"))
+    metin = (
+        f"💬 {html.escape(kim)} şunu iletmemi istedi, efendim:\n\n"
+        f"<i>{html.escape(ileti['mesaj'])}</i>"
+    )
+    sonuc = await send_message(metin, chat_id=str(alici["telegram_chat_id"]))
+    return bool(sonuc.get("ok"))
+
+
 async def send_voice(
     ogg_bytes: bytes,
     caption: str = "",

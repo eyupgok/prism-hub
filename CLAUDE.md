@@ -131,6 +131,12 @@ modules/
                    ("yarın dişçiye gidiyorum" → ertesi akşam "nasıl geçti?")
     service.py  → Gözlem turu: sinyal topla → susma bütçesi → modele sor →
                    gönder → kararı (SUSTUĞU turlar dahil) günlüğe yaz
+  iletiler/     → BİR KULLANICIDAN DİĞERİNE SÖZ (ayrıntı → "İletiler")
+    models.py   → iletiler tablosu. owner_id YOK: gonderen_id + alici_id,
+                   ikisi de gerçek taraf
+    service.py  → olustur / bekleyenler / vakti_gelenler / iptal.
+                   Engelleri `IletiHatasi` ile bildiriyor, metni doğrudan
+                   kullanıcıya gidiyor
   ozel/
     routes.py   → GET /api/ozel/özel sayfa — `ozel-sayfa/index.html`'i servis eder.
                    Statik `dist/`e KONMADI bilerek: orayı Caddy korumasız
@@ -344,6 +350,15 @@ gozlem_durum (owner_id, son_hafiza_conv_id, son_takip_conv_id)
               → Çıkarımlar `conversations` tablosunda nereye kadar geldi.
                 İki damga ayrı: biri hata verdiğinde diğerinin de o
                 konuşmaları atlaması gerekmiyor.
+
+iletiler     (id, gonderen_id, alici_id, mesaj, iletilecek_at, iletildi_at, created_at)
+              → "Zeynep'e akşam yedide şunu söyle" → o saatte alıcının
+                Telegram'ına düşen mesaj. Hatırlatıcı DEĞİL (alıcı bunu
+                görev olarak görmemeli, tamamlayamamalı, sabah özetinde
+                çıkmamalı), not değil, takip değil.
+              → ⚠️ `owner_id` YOK, bilerek: iki taraf da gerçek.
+                `gonderen_id` iptal hakkı kimde, `alici_id` mesaj kime.
+              → INDEX: idx_ileti_bekleyen(iletilecek_at) WHERE iletildi_at IS NULL
 
 conversations (id, chat_id, role[user|assistant], content, created_at)
               → INDEX: idx_conv_chat(chat_id)
@@ -713,6 +728,7 @@ döndürür; `dispatch()` diziyi görürse hepsini sırayla çalıştırıp yan�
 **Modüller ve aksiyonlar:**
 ```
 reminders.create / list / update / complete / delete   (update recurrence destekler)
+ileti.create / list / delete                           (başka kullanıcıya söz iletme)
 notes.create / read / list / search / update / delete
 expenses.create / list / summary / delete              (create expense_date destekler — "dün")
 budget.set / list / delete
@@ -890,6 +906,71 @@ bekçi hem ayarlar ekranı bunu çağırıyor. Durum kartı ayrıca **bağlı g�
 hiçbir şey görmemişse** uyarı basıyor — telefona günde onlarca bildirim düştüğü için
 bu sessizlik fiilen ölüm demek.
 
+## İletiler
+
+"Zeynep'e akşam yedide şunu söyle" → o saatte alıcının Telegram'ına asistanın
+ağzından düşen mesaj:
+
+> 💬 **Eyüp Bey** şunu iletmemi istedi, efendim:
+> *Akşam yemeğe geç kalacağım, beni bekleme.*
+
+Alıcıya kendi hitabıyla ("efendim") sesleniliyor, gönderen adıyla anılıyor
+("Eyüp Bey") — `ai_router.adiyla_hitap()` bu ayrımı zaten biliyor.
+**Selamlama yok** ("Merhaba"): günde birkaç ileti gidince her seferinde
+tekrarlanıp yapmacık duruyor.
+
+### Neden kendi tablosu
+
+| | Neden olmaz |
+|---|---|
+| `reminders` | Alıcı bunu görev sanır: "tamamla" der, sabah özetinde iş listesinde çıkar |
+| `notes` | Kimse bir şey saklamak istemiyor |
+| `takipler` | Takip SORMAK için; burada sorulacak değil iletilecek bir şey var |
+
+⚠️ `owner_id` **yok, bilerek.** Projenin geri kalanında `owner_id` "bu kayıt
+kimin" demek; burada iki taraf da gerçek. `gonderen_id` iptal hakkının kimde
+olduğunu, `alici_id` mesajın kime gideceğini söylüyor. Tek sütunla "Zeynep'e
+giden ama Eyüp'ün iptal edebildiği" kayıt ifade edilemezdi.
+
+### Yanlış kişiye gitmeme
+
+Bu, asistanın kullanıcı adına **başka bir insana** mesaj gönderdiği tek
+mekanizma. Yanlış kurulan hatırlatıcıyı kullanıcı görüp düzeltir; yanlış
+iletilen mesaj geri alınamaz. Korumalar:
+
+⚠️ **chat_id'si olmayan alıcıya ileti açılmıyor.** `telegram_bot.sahibin_chati()`
+sahipsiz bildirimleri `TELEGRAM_CHAT_ID`'e düşürüyor — yani ileti sessizce
+GÖNDERENİN kendisine giderdi, kullanıcı "iletildi" sanırdı. Baştan reddediliyor.
+
+⚠️ **Onay mesajı iletinin TAM METNİNİ gösteriyor.** Bu komut çoğunlukla sesli
+veriliyor ve Whisper bir kelimeyi yanlış duyabiliyor. Zamanlanmışsa iptal
+numarası da yazılıyor; hemen gidende en azından hata anında görülüp
+düzeltmesi yollanabiliyor.
+
+⚠️ **Türkçe büyük harf tuzağı** (`service.kisiyi_bul`): Python'da
+`"İ".lower()` → `"i"` + ayrı bir birleşen nokta (U+0307). Yani "ZEYNEP"
+ile "Zeynep" eşleşmiyordu. Küçültmeden önce `İ→i` ve `I→ı` elle eşleniyor.
+
+⚠️ **İşaretleme gönderimden SONRA** (`service.iletildi`): Telegram'a
+ulaşılamazsa ileti gönderilmemiş sayılıp bir sonraki turda yeniden denenmeli.
+
+⚠️ **Bayatlayan ileti düşer** (`VAZGECME_DAKIKA` = 60). Sunucu kapalı
+kaldıysa dört saat gecikmiş "akşam mesajı" iletmek, iletmemekten kötü —
+bağlamı çoktan geçmiş olur.
+
+⚠️ **Kişi başına en fazla `AZAMI_BEKLEYEN` (10) bekleyen ileti.** Alıcı bu
+mesajları istemedi; sınır, asistanı mesaj yağdırma aracına çevirmemek için.
+
+### Gözlem bütçesine tabi DEĞİL
+
+Kendiliğinden konuşma sınırı (`users.gozlem_sinir`) buraya işlemiyor. Sebebi:
+o bütçe **asistanın kendi inisiyatifini** dizginlemek için. İleti ise
+kullanıcının açık talimatı — alıcı açısından nişanlısından gelen bir mesaj,
+asistanın gevezeliği değil. Sınır yerine bekleyen sayısı sınırlı.
+
+Zamanlanmış iletide gönderene teslim haberi gidiyor ("✅ ... iletildi"),
+hemen gidende gitmiyor: onay mesajını zaten görüyor, ikincisi gürültü olur.
+
 ## İadeler
 
 **Negatif `amount` = iade.** Ayrı tablo/sütun yok; aylık toplam ve bütçe uyarısı zaten
@@ -997,6 +1078,9 @@ ilk yarıda hiç nokta olmayabiliyor ve yarım hece okunuyordu.
   ⚠️ Süpürme şart: `get_reminders_to_notify()` 60 dk'dan fazla gecikmişleri listeden çıkarıyor,
   öteleme de eskiden sadece o döngüde yapılıyordu — sunucu 1 saatten uzun kapalı kalırsa
   tekrarlayan hatırlatıcı sessizce ölüyordu.
+- **Her 1 dakika:** `bekleyen_iletiler()` → vakti gelen iletileri alıcılarına
+  gönderir. `check_reminders`'ın İÇİNE konmadı, ayrı bir iş: hatırlatıcı
+  tarafındaki bir hata iletileri de düşürürdü.
 - **Her gün 08:00 (Europe/Istanbul):** `send_morning_summary()` → hava + görevler + harcama + notlar özetini Telegram'a gönderir.
 - **Her gece 03:00:** `cleanup_conversations()` → 30 günden eski konuşma kayıtlarını siler.
 - **Her akşam 21:00:** `send_evening_summary()` → bugün tamamlanan görevler, kalanlar,

@@ -28,6 +28,46 @@ def reminder_loop_age_seconds() -> float | None:
     return (datetime.now(TZ) - last_reminder_check).total_seconds()
 
 
+async def bekleyen_iletiler():
+    """Vakti gelen iletileri alıcılarına gönderir (dakikalık iş).
+
+    ⚠️ İşaretleme gönderimden SONRA (`svc.iletildi`): Telegram'a ulaşılamazsa
+    ileti gönderilmemiş sayılıp bir sonraki turda yeniden denenmeli. Ters
+    sırada yapılsaydı bir ağ hatası mesajı sessizce yutardı.
+
+    Gönderene teslim haberi yalnız ZAMANLANMIŞ iletiler için gidiyor: hemen
+    gönderilende zaten onay mesajını görüyor, ikinci bir haber gürültü olur.
+    """
+    from database import get_db
+    from modules.iletiler import service as svc
+    from telegram_bot import ileti_gonder, sahibin_chati, send_message
+
+    with get_db() as conn:
+        sirada = svc.vakti_gelenler(conn)
+
+    for ileti in sirada:
+        try:
+            if not await ileti_gonder(ileti):
+                continue
+            with get_db() as conn:
+                svc.iletildi(conn, ileti["id"])
+
+            gecikmeli = ileti["iletilecek_at"] > ileti["created_at"]
+            if gecikmeli:
+                from auth import kullanici_getir
+                alici = kullanici_getir(ileti["alici_id"]) or {}
+                await send_message(
+                    f"✅ {alici.get('ad', 'Alıcı')} kişisine iletildi.",
+                    chat_id=sahibin_chati(ileti["gonderen_id"]),
+                )
+        except Exception:
+            log.exception("İleti gönderilemedi: %s", ileti["id"])
+
+    if sirada:
+        with get_db() as conn:
+            svc.temizle(conn)
+
+
 async def check_reminders():
     """Her 1 dakikada çalışır; bildirim zamanı gelen hatırlatıcıları gönderir"""
     global last_reminder_check
@@ -173,6 +213,18 @@ def start_scheduler():
     # İlk tur bir dakika sonra dönecek; o zamana kadar damga boş kalmasın diye
     # başlangıç anını yazıyoruz — yoksa açılışta /health kendini bozuk sanardı.
     last_reminder_check = datetime.now(TZ)
+
+    # İletiler de dakikalık: ayrı bir iş açmak yerine aynı sıklıkta ikinci bir
+    # job — check_reminders'ın içine gömülseydi hatırlatıcı hatası iletileri
+    # de düşürürdü.
+    scheduler.add_job(
+        bekleyen_iletiler,
+        "interval",
+        minutes=1,
+        id="bekleyen_iletiler",
+        replace_existing=True,
+        max_instances=1,
+    )
 
     scheduler.add_job(
         check_reminders,

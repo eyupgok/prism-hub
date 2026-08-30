@@ -67,6 +67,10 @@ reminders.update → id(int), title(str opsiyonel), due_datetime(ISO 8601 opsiyo
 reminders.complete → id(int)
 reminders.delete → id(int)
 
+ileti.create → alici(str: kişinin adı), mesaj(str: iletilecek söz, KULLANICININ AĞZINDAN), iletilecek_at(ISO 8601 opsiyonel — vakit söylenmediyse boş bırak, hemen gider)
+ileti.list → params boş (gönderilmeyi bekleyenler)
+ileti.delete → id(int)
+
 notes.create → title(str), content(str), category(iş|kişisel|genel|ders|fikir)
 notes.list → category(str opsiyonel)
 notes.read → id(int)
@@ -326,6 +330,9 @@ async def dispatch_one(parsed: Dict[str, Any], owner_id: int) -> str:
         if module == "reminders":
             return await _handle_reminders(action, params, owner_id)
 
+        if module == "ileti":
+            return await _handle_ileti(action, params, owner_id)
+
         if module == "notes":
             return await _handle_notes(action, params, owner_id)
 
@@ -482,6 +489,65 @@ async def _handle_reminders(action: str, params: Dict, owner_id: int) -> str:
             )
 
     return f"❓ Bilinmeyen aksiyon: {action}"
+
+
+async def _handle_ileti(action: str, params: Dict, owner_id: int) -> str:
+    """Başka bir kullanıcıya, asistanın ağzından iletilecek söz.
+
+    ⚠️ Onay mesajı iletinin TAM METNİNİ gösteriyor. Sebebi ses: bu komut çoğu
+    zaman sesli mesajla veriliyor ve Whisper bir kelimeyi yanlış duyabiliyor.
+    Kullanıcı ne gideceğini görmezse yanlış cümle nişanlısına gider ve haberi
+    bile olmaz. Zamanlanmışsa hâlâ iptal edebilir; hemen gidende en azından
+    hatayı anında görüp düzeltmesini yollar.
+    """
+    from database import get_db
+    from modules.iletiler import service as svc
+
+    with get_db() as conn:
+        if action == "create":
+            try:
+                ileti = svc.olustur(
+                    conn,
+                    owner_id,
+                    params.get("alici", ""),
+                    params.get("mesaj", ""),
+                    params.get("iletilecek_at"),
+                )
+            except svc.IletiHatasi as e:
+                return _esc(str(e))
+
+            alici_ad = _esc(ileti["alici"]["ad"])
+            govde = f"«{_esc(ileti['mesaj'])}»"
+            if ileti["hemen"]:
+                # Gönderimi dakikalık iş yapıyor; burada "iletilecek" demek
+                # doğru, "iletildi" demek yalan olurdu.
+                return f"{alici_ad} kişisine birazdan iletiyorum:\n{govde}"
+            an = svc.datetime.fromisoformat(ileti["iletilecek_at"])
+            return (
+                f"{an.strftime('%d.%m %H:%M')} — {alici_ad} kişisine ileteceğim:\n"
+                f"{govde}\n\nVazgeçerseniz: «{ileti['id']} numaralı iletiyi iptal et»"
+            )
+
+        if action == "list":
+            bekleyen = svc.bekleyenler(conn, owner_id)
+            if not bekleyen:
+                return "Bekleyen iletiniz yok."
+            satirlar = ["<b>Bekleyen iletiler:</b>"]
+            for i in bekleyen:
+                an = svc.datetime.fromisoformat(i["iletilecek_at"])
+                satirlar.append(
+                    f"[{i['id']}] {an.strftime('%d.%m %H:%M')} → {_esc(i['alici_ad'])}: "
+                    f"«{_esc(i['mesaj'])}»"
+                )
+            return "\n".join(satirlar)
+
+        if action == "delete":
+            silinen = svc.iptal(conn, owner_id, int(params["id"]))
+            if not silinen:
+                return "Öyle bir bekleyen ileti bulamadım."
+            return f"İptal edildi: «{_esc(silinen['mesaj'])}»"
+
+    return "Bu iletiyle ne yapmamı istediğinizi anlayamadım."
 
 
 async def _handle_notes(action: str, params: Dict, owner_id: int) -> str:
