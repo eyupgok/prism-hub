@@ -54,9 +54,16 @@ kullanici.py         → Komut satırı aracı: kullanıcı ekle / parola deği�
                        Parola ve chat_id koda ya da .env'e yazılmasın diye ayrı komut.
 tanitim.py           → Telegram'dan arka arkaya mesaj yollayıp paneli açmaya çağırır
                        (özel sayfa için). Metinler dosyanın başındaki
-                       MESAJLAR listesinde; son satırdaki {panel} panel adresine
-                       dönüşür. `--liste` hiçbir şey göndermeden önizler,
-                       `--kime "<ad>"` gönderir ve önce onay sorar.
+                       MESAJLAR listesinde; {panel} panel adresine, {parola}
+                       alıcının panel parolasına dönüşür. `--liste` hiçbir şey
+                       göndermeden önizler, `--kime "<ad>"` gönderir ve önce
+                       onay sorar.
+                       ⚠️ **Parola dosyada DEĞİL** — çalışırken alınıyor
+                       (`--parola`, `TANITIM_PAROLA`, ya da ekrana yazılmayan
+                       soru). Dosyaya yazılsaydı git geçmişine ve GitHub'a
+                       girer, bir daha silinemezdi. Karma scrypt olduğu için
+                       veritabanından okunamaz: bilinmiyorsa önce
+                       `kullanici.py parola` ile yenisi konur.
                        ⚠️ Gönderilen mesaj geri alınamaz — sıra: --liste, kendine
                        prova, sonra gerçeği.
 gozlem.py            → Gözlem katmanının denetim aracı: asistanın hafızası
