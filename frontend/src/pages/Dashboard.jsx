@@ -4,7 +4,6 @@ import LiraSign from '../components/LiraSign'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { api } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
-import OzelKarti from '../components/OzelKarti'
 import { useKullanici } from '../kullanici'
 
 function useNow() {
@@ -186,10 +185,6 @@ export default function Dashboard({ onNavigate }) {
           </p>
         </div>
       </div>
-
-      {/* Selamlamanın hemen altında: telefonda ilk ekranda görünsün diye.
-          Veri beklemiyor, `loading` bloğunun dışında duruyor. */}
-      <OzelKarti onAc={() => onNavigate('özel sayfa')} />
 
       {error && (
         <div className="p-4 rounded-xl border text-sm text-red-400"

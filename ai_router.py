@@ -26,10 +26,7 @@ Kullanıcı Türkçe konuşur. Mesajları analiz et ve SADECE JSON formatında y
 ## KİMLİĞİN VE ÜSLUBUN
 Iron Man'deki JARVIS gibisin: kusursuz nezaket, sakin bir yetkinlik, arada kuru bir espri.
 
-- Adın PRISM. Şu an {ad} ile konuşuyorsun, başka bir isim uydurma.
-- **Seni {mimar} yazdı** — bu sistemin mimarı odur. Karşındaki kişi oysa ondan
-  üçüncü şahıs gibi bahsetme. Bunu ne övünerek anlatırsın ne de her fırsatta
-  anarsın: sorulduğunda ya da gerçekten yeri geldiğinde söylersin.
+- Adın PRISM. Şu an {ad} ile konuşuyorsun, başka bir isim uydurma.{mimar_kurali}
 - **Daima SİZ diye hitap et.** "yaptın", "ister misin", "bak" DEĞİL;
   "yaptınız", "ister misiniz", "bakınız". Bu kural istisnasız.
 - **Olağan seslenişin "efendim".** JARVIS'in "sir"i gibi: sık ve doğal.
@@ -242,11 +239,22 @@ OLAGAN_HITAP = "efendim"
 
 # PRISM'i yazan kişi. **Hafızaya değil kimliğe ait**: hafıza kullanıcı hakkında
 # bilgi tutar ve kişiye özeldir, mimar ise kim konuşursa konuşsun aynıdır —
-# Zeynep konuşurken de mimar Eyüp Bey'dir.
+# ikinci kullanıcı konuşurken de sistemi yazan kişi aynıdır.
 #
 # users tablosundan okunmuyor: her mesaja fazladan bir sorgu eklerdi ve bu
-# değişen bir değer değil. Sistemin sahibi değişirse burası da değişir.
-MIMAR = "Eyüp Bey"
+# değişen bir değer değil.
+#
+# Boş bırakılabilir: o zaman yönergedeki ilgili satır hiç yazılmaz, yani
+# asistan kimin yazdığı konusunda bir şey uydurmaz. Kendi kurulumunda
+# doldurmak istersen .env → PRISM_MIMAR.
+MIMAR = os.getenv("PRISM_MIMAR", "").strip()
+
+# Yönergeye ancak MIMAR doluysa giren satır. Metni burada tutmak, boş
+# kurulumda yönergede sarkan bir cümle kalmamasını garanti ediyor.
+_MIMAR_KURALI = """
+- **Seni {mimar} yazdı** — bu sistemin mimarı odur. Karşındaki kişi oysa ondan
+  üçüncü şahıs gibi bahsetme. Bunu ne övünerek anlatırsın ne de her fırsatta
+  anarsın: sorulduğunda ya da gerçekten yeri geldiğinde söylersin."""
 
 
 def adiyla_hitap(ad: str, hitap: Optional[str]) -> str:
@@ -281,7 +289,7 @@ def yonerge_metni(
         today=now.strftime("%Y-%m-%d"),
         ad=ad,
         adiyla=adiyla_hitap(ad, hitap),
-        mimar=MIMAR,
+        mimar_kurali=_MIMAR_KURALI.format(mimar=MIMAR) if MIMAR else "",
         panel_url=panel_adresi(),
         hafiza=hafiza_metni,
     )

@@ -99,7 +99,7 @@ fun SettingsScreen(store: SettingsStore) {
                 value = url,
                 onValueChange = { url = it },
                 label = { Text("Sunucu URL") },
-                placeholder = { Text("https://kendi-alan-adin.example.com", color = PrismTextFaint) },
+                placeholder = { Text("https://sunucu-adresin.example.com", color = PrismTextFaint) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )

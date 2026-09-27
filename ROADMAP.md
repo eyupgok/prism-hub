@@ -1,6 +1,12 @@
 # PRISM — Özellik Yol Haritası
 
-Bu doküman PRISM'e eklenebilecek özellikleri kategori ve öncelik bazında listeler.
+> **Not:** Bu tarihsel bir planlama belgesi. Aşağıdaki maddelerin çoğu
+> (kimlik doğrulama, webhook secret, tekrarlayan hatırlatıcı düzeltmesi,
+> akşam/hafta özetleri, çoklu komut, PWA, sesli yanıt, panel girişi)
+> **yapıldı**; hangi kararın neden verildiği `CLAUDE.md`'de anlatılıyor.
+> Burayı sürüyorum çünkü bir özelliğin neden sıraya girdiğini —
+> ve bazılarının neden hiç yapılmadığını — gösteriyor.
+
 Öncelikler: 🔴 Kritik · 🟡 Değerli · 🟢 Güzel olur
 
 ---

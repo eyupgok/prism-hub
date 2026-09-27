@@ -15,7 +15,6 @@ görebiliyor ama yalnız kendi kaydını değiştirebiliyor. Ayrıntısı → "�
 - **DB:** SQLite (WAL mode) — `prism.db`
 - **Zamanlayıcı:** APScheduler (AsyncIOScheduler)
 - **Deploy:** Oracle Cloud VM (Ubuntu 24.04) — systemd servisi `prism.service` + Caddy ters vekil (HTTPS).
-  `Procfile` duruyor ama kullanılmıyor (Railway kalıntısı).
 - **Hava durumu:** Open-Meteo API (kayıt gerektirmez)
 - **Telegram:** Webhook tabanlı (`/webhook` POST endpoint)
 
@@ -52,20 +51,6 @@ yetki.py             → Yetki kuralları: `bakilan_sahip()` (GET'te kimin veris
                        `yazma_izni()` (yazmadan önce sahiplik; yoksa 404, başkasınınsa 403)
 kullanici.py         → Komut satırı aracı: kullanıcı ekle / parola değiştir / chat-id ata.
                        Parola ve chat_id koda ya da .env'e yazılmasın diye ayrı komut.
-tanitim.py           → Telegram'dan arka arkaya mesaj yollayıp paneli açmaya çağırır
-                       (özel sayfa için). Metinler dosyanın başındaki
-                       MESAJLAR listesinde; {panel} panel adresine, {parola}
-                       alıcının panel parolasına dönüşür. `--liste` hiçbir şey
-                       göndermeden önizler, `--kime "<ad>"` gönderir ve önce
-                       onay sorar.
-                       ⚠️ **Parola dosyada DEĞİL** — çalışırken alınıyor
-                       (`--parola`, `TANITIM_PAROLA`, ya da ekrana yazılmayan
-                       soru). Dosyaya yazılsaydı git geçmişine ve GitHub'a
-                       girer, bir daha silinemezdi. Karma scrypt olduğu için
-                       veritabanından okunamaz: bilinmiyorsa önce
-                       `kullanici.py parola` ile yenisi konur.
-                       ⚠️ Gönderilen mesaj geri alınamaz — sıra: --liste, kendine
-                       prova, sonra gerçeği.
 gozlem.py            → Gözlem katmanının denetim aracı: asistanın hafızası
                        (`bilgi` / `ekle` / `unut` / `cikar`), sonradan
                        soracakları (`takip` / `takip-cikar` / `takip-unut`),
@@ -82,7 +67,6 @@ telegram_bot.py      → /webhook (secret token doğrulama + BackgroundTasks), h
                        ses transkripsiyon, fotoğraf → vision analizi, callback
 scheduler.py         → Her 1 dk hatırlatıcı kontrolü, 08:00 sabah özeti, 03:00 konuşma temizliği
 requirements.txt
-Procfile
 .env.example
 
 modules/
@@ -145,12 +129,6 @@ modules/
     service.py  → olustur / bekleyenler / vakti_gelenler / iptal.
                    Engelleri `IletiHatasi` ile bildiriyor, metni doğrudan
                    kullanıcıya gidiyor
-  ozel/
-    routes.py   → GET /api/ozel/özel sayfa — `ozel-sayfa/index.html`'i servis eder.
-                   Statik `dist/`e KONMADI bilerek: orayı Caddy korumasız
-                   yayınlıyor, sayfada kişiye özel içerik var.
-                   Buradan geçince /api korumasının altına giriyor.
-
 frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin kökünde yayında)
   src/index.css      → TASARIM SİSTEMİ. Renkler `:root` altında CSS değişkeni; tema
                        değiştirmek için sadece burayı düzenle, bileşenlere dokunma.
@@ -184,24 +162,12 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
   src/components/KisiSeridi.jsx
                      → Üstteki kişi geçişi + salt görüntüleme işareti (göz simgesi).
                        Tek kullanıcı varsa hiç çizilmez.
-  src/components/OzelKarti.jsx
-                     → Dashboard'da selamlamanın altındaki tanıtım kartı →
-                       `onNavigate('özel sayfa')`. Rengi panelin morundan değil
-                       vurgu tonundan (#F14A6E): diğer kartlara
-                       benzerse gözden kaçıyordu.
-  src/pages/OzelSayfa.jsx
-                     → Tam ekran özel sayfa (`/api/ozel/özel sayfa` çerçeve içinde).
-                       `App.jsx`'te kabuğun DIŞINDA çiziliyor — kenar çubuğu
-                       ve alt gezinme arasına sıkışırsa etkisi kalmıyor.
-                       Yeni sekmede AÇILMIYOR: iPhone'da ana ekrana eklenmiş
-                       panel yeni sekmeyi Safari'de açıyor, oturum çerezi
-                       orada olmayabiliyor → "giriş yap" ekranına düşerdi.
   src/components/ErrorBoundary.jsx
                      → Render hatasında beyaz ekran yerine sebebi gösterir
                        (React'te hata sınırı yalnızca sınıf bileşeniyle yazılabiliyor)
   public/manifest.webmanifest + icon-*.png
                      → Ana ekrana eklenince uygulama gibi açılır (PWA).
-                       **İKİSİNİN DE asıl uygulaması bu** — Android tarafındaki
+                       **Asıl uygulama bu** — Android tarafındaki
                        ekranlar buraya devredildi (bkz. "Android: sensör
                        uygulaması"). Chrome, manifest + iki boyutta simge +
                        HTTPS'i görünce kurmayı teklif ediyor ve arka planda
@@ -212,21 +178,6 @@ frontend/            → React 18 + Vite + Tailwind web panel (aynı domainin k�
                        gönderemez. Hatırlatıcılar bu yüzden Telegram'dan.
                        index.html'de `viewport-fit=cover` ŞART — alt gezinmedeki
                        env(safe-area-inset-bottom) ancak onunla çalışıyor.
-
-ozel-sayfa/         → Korumalı, kişiye özel içerik sayfası.
-                       `kaynak.html` + `fontlar/` → `yap.py` → `index.html`
-                       (tek dosya, fontlar base64 gömülü, dışarıdan hiçbir şey
-                       çekmiyor). Metinleri kaynak.html'deki CONFIG'ten değiştir,
-                       sonra `python yap.py` çalıştır — index.html'i ELLE düzenleme.
-                       Ayrıntı: `ozel-sayfa/BENIOKU.md`.
-                       ⚠️ Dikey ekran için tasarlandı. `.stage`'in min-height'ı
-                       540px; ekran ondan kısalınca (telefon yan çevrilince ~390px)
-                       altyazılar ve kapanış imzası görünmez oluyordu. Artık
-                       "Telefonu dik tut" uyarısı çıkıp önüne geçiyor —
-                       eşik (539px) min-height ile aynı sayıya bağlı, birini
-                       değiştirirsen diğerini de değiştir.
-                       ⚠️ iOS'ta yan taraftaki SESSİZ DÜĞMESİ açıksa müzik hiç
-                       çalmaz (Web Audio o anahtara bağlı) — ses tuşuyla ilgisi yok.
 
 mobileapp/           → "PRISM Köprü" — SENSÖR uygulaması (Compose, minSdk 26).
                        Tek işi banka bildirimlerini yakalayıp sunucuya iletmek.
@@ -460,11 +411,14 @@ samimi kalıpları kelime sınırıyla arayıp yakalıyor.
 "sir"inin karşılığı (`ai_router.OLAGAN_HITAP`). Asistanın ağzından çıkan
 seslenişlerin neredeyse tamamı bu.
 
-**Mimarını bilir:** `ai_router.MIMAR` ("Eyüp Bey") yönergeye `{mimar}` ile
-giriyor. ⚠️ Bu **hafızaya değil KİMLİĞE** ait — hafıza kullanıcı hakkında bilgi
-tutar ve kişiye özeldir (`owner_id`), mimar ise kim konuşursa konuşsun aynıdır.
-Zeynep konuşurken de PRISM'i yazan kişi Eyüp Bey. `users` tablosundan
-okunmuyor: her mesaja fazladan bir sorgu eklerdi ve değişen bir değer değil.
+**Mimarını bilebilir:** `ai_router.MIMAR` — `.env`'deki `PRISM_MIMAR`'dan
+okunuyor, **varsayılanı boş**. Doluysa yönergeye bir satır giriyor ("seni şu
+kişi yazdı"), boşsa o satır hiç yazılmıyor; yani asistan kimin yazdığı
+konusunda bir şey uydurmuyor (`tests/test_uslup.py` ikisini de kilitliyor).
+
+⚠️ Bu **hafızaya değil KİMLİĞE** ait — hafıza kullanıcı hakkında bilgi tutar ve
+kişiye özeldir (`owner_id`), mimar ise kim konuşursa konuşsun aynıdır. `users`
+tablosundan okunmuyor: her mesaja fazladan bir sorgu eklerdi ve değişmiyor.
 
 **Adıyla seslenmek istisna:** `users.hitap` ("Bey" / "Hanım") →
 `ai_router.adiyla_hitap()` → "Eyüp Bey". Yönergeye `{adiyla}` yer tutucusuyla
@@ -1010,8 +964,8 @@ numarası da yazılıyor; hemen gidende en azından hata anında görülüp
 düzeltmesi yollanabiliyor.
 
 ⚠️ **Türkçe büyük harf tuzağı** (`service.kisiyi_bul`): Python'da
-`"İ".lower()` → `"i"` + ayrı bir birleşen nokta (U+0307). Yani "ZEYNEP"
-ile "Zeynep" eşleşmiyordu. Küçültmeden önce `İ→i` ve `I→ı` elle eşleniyor.
+`"İ".lower()` → `"i"` + ayrı bir birleşen nokta (U+0307). Yani "İLKNUR"
+ile "İlknur" eşleşmiyordu. Küçültmeden önce `İ→i` ve `I→ı` elle eşleniyor.
 
 ⚠️ **İşaretleme gönderimden SONRA** (`service.iletildi`): Telegram'a
 ulaşılamazsa ileti gönderilmemiş sayılıp bir sonraki turda yeniden denenmeli.
@@ -1309,6 +1263,8 @@ PANEL_PASSWORD           → SADECE İLK KURULUMDA okunur: users tablosu boşken
                             değiştirmek için `kullanici.py parola "<ad>"`. Env'i değiştirmek
                             girişi etkilemez.
 PANEL_USER_NAME          → İlk kullanıcının adı (varsayılan: Eyüp). Sadece ilk kurulumda.
+PRISM_MIMAR              → Asistanın "beni kim yazdı" cevabı. Boşsa (varsayılan)
+                            yönergedeki o satır hiç yazılmaz → "Asistanın Üslubu"
 SESSION_SECRET           → Panel oturum biletinin imza anahtarı. Yoksa API_KEY'e düşer
                             (eski davranış). Değişirse açık oturumların hepsi düşer.
 ELEVENLABS_API_KEY       → Seslendirme anahtarı. Yoksa ses hiç üretilmez,
@@ -1378,7 +1334,8 @@ bırakmanın maliyeti yok. Yeni bir Groq çağrısı eklerken dar tutma.
 
 ## Deploy
 
-Sunucu: Oracle Cloud Always Free VM (`<sunucu-ip>`, Ubuntu 24.04, Frankfurt).
+Sunucu: Oracle Cloud Always Free VM (Ubuntu 24.04). Gerçek adres ve IP
+bu dosyada TUTULMUYOR — repo public.
 Kod GitHub'dan **salt-okunur deploy key** ile iner — sunucuda geliştirme yapılmaz.
 
 ```bash
@@ -1448,7 +1405,7 @@ Birkaç gün sonra `python gozlem.py gunluk` ile hangi turda ne olduğuna bak;
 ```bash
 cd ~/prism && source venv/bin/activate
 python gecmis.py                        # son 40 satır, herkes
-python gecmis.py --kisi "Zeynep"      # Telegram + panel kanallarını birlikte getirir
+python gecmis.py --kisi "Zeynep"           # Telegram + panel kanallarını birlikte getirir
 python gecmis.py --son 100 --ara dişçi
 python gecmis.py --ham                  # Groq'un ürettiği JSON'u olduğu gibi
 ```

@@ -43,13 +43,27 @@ def test_hitap_yonergeye_giriyor():
 
 # ── Kimlik ───────────────────────────────────────────────────────────────────
 
-def test_mimar_kim_konusursa_konussun_ayni():
-    """Mimar hafızaya değil KİMLİĞE ait: hafıza kişiye özel, mimar değil.
-    Zeynep konuşurken de PRISM'i yazan kişi Eyüp Bey."""
+def test_mimar_kim_konusursa_konussun_ayni(monkeypatch):
+    """Mimar hafızaya değil KİMLİĞE ait: hafıza kişiye özel (`owner_id`),
+    mimar ise kim konuşursa konuşsun aynı."""
+    monkeypatch.setattr(ai_router, "MIMAR", "Ada Lovelace")
+
     for ad, hitap in (("Eyüp", "Bey"), ("Zeynep", "Hanım")):
         yonerge = ai_router.yonerge_metni(ad, hitap)
-        assert ai_router.MIMAR in yonerge
+        assert "Ada Lovelace" in yonerge
         assert "mimarı odur" in yonerge
+
+
+def test_mimar_bossa_yonergede_sarkan_cumle_kalmiyor():
+    """⚠️ Varsayılan BOŞ (PRISM_MIMAR yazılmadıysa). O hâlde satırın tamamı
+    düşmeli — yarım kalmış "Seni  yazdı" cümlesi, asistanı kimin yazdığı
+    konusunda uydurmaya iter."""
+    assert ai_router.MIMAR == ""          # env'de yokken
+
+    yonerge = ai_router.yonerge_metni("Eyüp", "Bey")
+
+    assert "mimarı odur" not in yonerge
+    assert "Seni  yazdı" not in yonerge
 
 
 def test_yonergede_doldurulmamis_yer_tutucu_kalmiyor():

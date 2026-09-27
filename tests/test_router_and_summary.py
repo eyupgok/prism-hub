@@ -103,13 +103,13 @@ async def test_haftalik_rapor_cubuk_ve_kategori(db):
 def test_panel_adresi_webhook_urlden_turer(monkeypatch):
     """Panel, webhook ile aynı alan adının kökünde — ayrı değişken şart değil."""
     monkeypatch.delenv("PANEL_URL", raising=False)
-    monkeypatch.setenv("WEBHOOK_URL", "https://kendi-alan-adin.example.com/")
+    monkeypatch.setenv("WEBHOOK_URL", "https://ornek.example.com/")
 
-    assert ai_router.panel_adresi() == "https://kendi-alan-adin.example.com"
+    assert ai_router.panel_adresi() == "https://ornek.example.com"
 
 
 def test_panel_url_webhookun_onunde(monkeypatch):
-    monkeypatch.setenv("WEBHOOK_URL", "https://kendi-alan-adin.example.com")
+    monkeypatch.setenv("WEBHOOK_URL", "https://ornek.example.com")
     monkeypatch.setenv("PANEL_URL", "https://panel.ornek.com")
 
     assert ai_router.panel_adresi() == "https://panel.ornek.com"

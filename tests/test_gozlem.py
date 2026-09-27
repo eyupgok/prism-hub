@@ -469,21 +469,28 @@ def test_dagink_saatler_tek_aralik_gibi_gosterilmiyor(db):
 # ertesi akşam sorulacak bir soruya çeviriyor.
 
 def _takip(db, owner=SAHIP, konu="dişçi randevusu", saat_farki=0):
-    an = datetime.now(TZ) + timedelta(hours=saat_farki)
-    return takip.ekle(db, owner, konu, f"{konu} nasıl geçti?", an.isoformat())
+    """⚠️ Zaman `_an()`'a bağlı, `datetime.now()`'a DEĞİL.
+
+    Gerçek saate bağlıyken bu yardımcı, testin geri kalanının kullandığı sabit
+    andan (`_an()`) kopuyordu: takip gerçek günde kuruluyor, `tur()` ise
+    2026-09-15'i "şimdi" sanıyordu. Aradaki fark bayatlama eşiğini (3 gün)
+    geçince sinyal hiç üretilmiyor ve test takvime göre geçip kalıyordu.
+    """
+    an = _an() + timedelta(hours=saat_farki)
+    return takip.ekle(db, owner, konu, f"{konu} nasıl geçti?", an.isoformat(), now=_an())
 
 
 def test_takip_vakti_gelmeden_sorulmaz(db):
     _takip(db, saat_farki=+5)
 
-    assert takip.acik_takipler(db, SAHIP)          # kayıt duruyor
-    assert takip.vakti_gelenler(db, SAHIP, datetime.now(TZ)) == []
+    assert takip.acik_takipler(db, SAHIP, _an())          # kayıt duruyor
+    assert takip.vakti_gelenler(db, SAHIP, _an()) == []
 
 
 def test_takip_vakti_gelince_sinyale_donuyor(db):
     t = _takip(db, saat_farki=-1)
 
-    bulunan = sinyaller.bekleyen_takip(db, SAHIP, datetime.now(TZ))
+    bulunan = sinyaller.bekleyen_takip(db, SAHIP, _an())
 
     assert len(bulunan) == 1
     assert bulunan[0]["anahtar"] == f"takip:{t['id']}"
@@ -495,8 +502,8 @@ def test_sorulmus_takip_tekrar_sorulmaz(db):
     t = _takip(db, saat_farki=-1)
     takip.soruldu(db, t["id"])
 
-    assert takip.vakti_gelenler(db, SAHIP, datetime.now(TZ)) == []
-    assert takip.acik_takipler(db, SAHIP) == []
+    assert takip.vakti_gelenler(db, SAHIP, _an()) == []
+    assert takip.acik_takipler(db, SAHIP, _an()) == []
 
 
 def test_bayatlayan_takip_dusuyor(db):
@@ -504,10 +511,10 @@ def test_bayatlayan_takip_dusuyor(db):
     geçti?' ilgi değil dalgınlık gösterir."""
     _takip(db, saat_farki=-24 * (TAKIP_BAYATLAMA_GUNU + 1))
 
-    assert takip.acik_takipler(db, SAHIP) == []
-    assert takip.vakti_gelenler(db, SAHIP, datetime.now(TZ)) == []
+    assert takip.acik_takipler(db, SAHIP, _an()) == []
+    assert takip.vakti_gelenler(db, SAHIP, _an()) == []
 
-    takip.temizle(db)
+    takip.temizle(db, _an())
     assert db.execute("SELECT COUNT(*) c FROM takipler").fetchone()["c"] == 0
 
 
@@ -515,7 +522,7 @@ def test_ayni_konu_iki_kez_alinmaz(db):
     _takip(db, konu="dişçi randevusu")
 
     assert _takip(db, konu="dişçi randevusu") is None
-    assert len(takip.acik_takipler(db, SAHIP)) == 1
+    assert len(takip.acik_takipler(db, SAHIP, _an())) == 1
 
 
 def test_sorulmus_konu_yeniden_alinmaz(db):
@@ -526,7 +533,7 @@ def test_sorulmus_konu_yeniden_alinmaz(db):
     t = _takip(db, konu="dişçi randevusu", saat_farki=-1)
     takip.soruldu(db, t["id"])
 
-    assert takip.acik_takipler(db, SAHIP) == []          # artık açık değil
+    assert takip.acik_takipler(db, SAHIP, _an()) == []          # artık açık değil
     assert _takip(db, konu="dişçi randevusu") is None    # ama yine de engelliyor
 
 
@@ -535,19 +542,19 @@ def test_takip_sinirini_asmaz(db):
     for i in range(AZAMI_ACIK_TAKIP + 3):
         _takip(db, konu=f"konu {i}", saat_farki=+1)
 
-    assert len(takip.acik_takipler(db, SAHIP)) == AZAMI_ACIK_TAKIP
+    assert len(takip.acik_takipler(db, SAHIP, _an())) == AZAMI_ACIK_TAKIP
 
 
 def test_bozuk_zaman_damgasi_kayit_acmaz(db):
-    assert takip.ekle(db, SAHIP, "konu", "soru?", "yarın akşam") is None
-    assert takip.ekle(db, SAHIP, "", "soru?", datetime.now(TZ).isoformat()) is None
+    assert takip.ekle(db, SAHIP, "konu", "soru?", "yarın akşam", now=_an()) is None
+    assert takip.ekle(db, SAHIP, "", "soru?", _an().isoformat(), now=_an()) is None
 
 
 def test_takip_kisiye_ozel(db):
     _takip(db, owner=SAHIP, konu="dişçi", saat_farki=-1)
     _takip(db, owner=OTEKI, konu="sınav", saat_farki=-1)
 
-    bulunan = sinyaller.bekleyen_takip(db, SAHIP, datetime.now(TZ))
+    bulunan = sinyaller.bekleyen_takip(db, SAHIP, _an())
 
     assert len(bulunan) == 1
     assert "dişçi" in bulunan[0]["kanit"]

@@ -23,7 +23,6 @@ from modules.notes.routes import router as notes_router
 from modules.expenses.routes import router as expenses_router, budget_router
 from modules.weather.routes import router as weather_router
 from modules.summary.routes import router as summary_router
-from modules.ozel.routes import router as ozel_router
 
 
 @asynccontextmanager
@@ -89,7 +88,6 @@ app.include_router(expenses_router, dependencies=protected)
 app.include_router(budget_router, dependencies=protected)
 app.include_router(weather_router, dependencies=protected)
 app.include_router(summary_router, dependencies=protected)
-app.include_router(ozel_router, dependencies=protected)
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])

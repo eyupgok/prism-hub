@@ -51,8 +51,11 @@ def test_kendine_ileti_gonderilemiyor(db):
 
 
 def test_kisi_bosluk_ve_buyuk_harf_farkindan_bulunuyor(db):
-    """Model kullanıcının yazdığı adı olduğu gibi geçiriyor: "zeynep",
-    "Zeynep", "ZEYNEP" — hepsi aynı kişi."""
+    """Model kullanıcının yazdığı adı olduğu gibi geçiriyor: "öteki",
+    "Öteki", "ÖTEKİ" — hepsi aynı kişi.
+
+    ⚠️ Örnek ad İ harfi taşıyor, bilerek: "İ".lower() Python'da fazladan bir
+    birleşen nokta üretiyor ve `kisiyi_bul` bunu elle eşliyor."""
     for yazim in ("Öteki", "öteki", " ÖTEKİ "):
         bulunan = svc.kisiyi_bul(db, yazim)
         assert bulunan and bulunan["id"] == OTEKI

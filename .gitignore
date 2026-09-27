@@ -6,6 +6,10 @@ ssh/
 *.key
 *.pem
 
+# Kişisel çalışma notu — sunucu adresi, SSH yolu, hangi ayarın nerede
+# durduğu gibi yalnız bana ait bilgiler var. Repo public, bu dosya değil.
+DURUM.md
+
 # Ekran görüntüleri (kurulum notları, repoya girmesin)
 screenshots/
 

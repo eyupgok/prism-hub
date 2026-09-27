@@ -24,9 +24,9 @@ class IletiHatasi(Exception):
 def kisiyi_bul(conn, ad: str) -> Optional[Dict[str, Any]]:
     """Adı geçen kişiyi bulur (tam eşleşme, sonra baş harfleriyle).
 
-    Model kullanıcının yazdığı adı olduğu gibi geçiriyor: "Zeynep",
-    "zeynep", "Zeynep". Tam eşleşme aramak "zeynep" yazınca kişiyi
-    bulamamak demekti.
+    Model kullanıcının yazdığı adı olduğu gibi geçiriyor: "İlknur Demir",
+    "ilknurdemir", "İlknur". Yalnız tam eşleşme aramak, boşluğu yutulmuş ya
+    da kısaltılmış bir yazımda kişiyi bulamamak demekti.
     """
     ad = (ad or "").strip()
     if not ad:
@@ -36,7 +36,7 @@ def kisiyi_bul(conn, ad: str) -> Optional[Dict[str, Any]]:
 
     def sadelestir(m: str) -> str:
         # ⚠️ Türkçe büyük harf tuzağı: Python'da "İ".lower() → "i" + ayrı bir
-        # birleşen nokta (U+0307), yani "ZEYNEP" ile "Zeynep" eşleşmiyordu.
+        # birleşen nokta (U+0307), yani "İLKNUR" ile "İlknur" eşleşmiyordu.
         # Küçültmeden önce iki harfi elle eşliyoruz.
         m = m.replace("İ", "i").replace("I", "ı")
         return "".join(m.lower().split())
@@ -45,7 +45,7 @@ def kisiyi_bul(conn, ad: str) -> Optional[Dict[str, Any]]:
     for k in satirlar:
         if sadelestir(k["ad"]) == hedef:
             return k
-    # "Zeynep" → "Zeynep"; birden fazla kişiye uyuyorsa seçim yapmıyoruz
+    # "İlknur" → "İlknur Demir"; birden fazla kişiye uyuyorsa seçim yapmıyoruz
     adaylar = [k for k in satirlar if sadelestir(k["ad"]).startswith(hedef)]
     return adaylar[0] if len(adaylar) == 1 else None
 

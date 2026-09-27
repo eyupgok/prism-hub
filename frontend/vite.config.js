@@ -12,7 +12,9 @@ export default defineConfig({
     },
   },
   preview: {
-    allowedHosts: ['.railway.app', '.example.com'],
+    // Geliştirme sunucusuna dışarıdan (tünel/alan adı) erişilecekse
+    // kendi ana alan adını buraya ekle.
+    allowedHosts: ['.localhost'],
     host: '0.0.0.0',
     port: process.env.PORT ? parseInt(process.env.PORT) : 4173
   }

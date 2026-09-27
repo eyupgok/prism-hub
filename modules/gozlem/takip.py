@@ -114,9 +114,18 @@ geçmez. Bir şey bulmak için zorlama — gereksiz soru soran asistan yorucudur
 
 # ── Okuma / yazma ────────────────────────────────────────────────────────────
 
-def acik_takipler(conn, owner_id: int) -> List[Dict[str, Any]]:
-    """Henüz sorulmamış, henüz bayatlamamış takipler."""
-    esik = (datetime.now(TZ) - timedelta(days=TAKIP_BAYATLAMA_GUNU)).isoformat()
+def acik_takipler(
+    conn, owner_id: int, now: Optional[datetime] = None
+) -> List[Dict[str, Any]]:
+    """Henüz sorulmamış, henüz bayatlamamış takipler.
+
+    ⚠️ `now` enjekte edilebilir olmak ZORUNDA: bayatlama eşiği buradan
+    hesaplanıyor ve `vakti_gelenler()` kendi `now`'ıyla süzüyor. İkisi ayrı
+    saat kullanırsa fonksiyon yalnız gerçek saat testin varsaydığı ana
+    yakınken doğru cevap verir — yani test takvime bağlı hâle gelir.
+    """
+    now = now or datetime.now(TZ)
+    esik = (now - timedelta(days=TAKIP_BAYATLAMA_GUNU)).isoformat()
     return [dict(r) for r in conn.execute(
         "SELECT * FROM takipler WHERE owner_id = ? AND soruldu_at IS NULL "
         "AND sorulacak_at >= ? ORDER BY sorulacak_at ASC",
@@ -127,13 +136,18 @@ def acik_takipler(conn, owner_id: int) -> List[Dict[str, Any]]:
 def vakti_gelenler(conn, owner_id: int, now: datetime) -> List[Dict[str, Any]]:
     """Sorulma vakti gelmiş ama henüz bayatlamamış takipler."""
     return [
-        t for t in acik_takipler(conn, owner_id)
+        t for t in acik_takipler(conn, owner_id, now)
         if datetime.fromisoformat(t["sorulacak_at"]) <= now
     ]
 
 
 def ekle(
-    conn, owner_id: int, konu: str, soru: str, sorulacak_at: str
+    conn,
+    owner_id: int,
+    konu: str,
+    soru: str,
+    sorulacak_at: str,
+    now: Optional[datetime] = None,
 ) -> Optional[Dict[str, Any]]:
     """Takip ekler. Aynı konu zaten varsa ya da sınır dolduysa None döner."""
     konu, soru = (konu or "").strip(), (soru or "").strip()
@@ -157,7 +171,7 @@ def ekle(
     ).fetchone():
         return None
 
-    if len(acik_takipler(conn, owner_id)) >= AZAMI_ACIK_TAKIP:
+    if len(acik_takipler(conn, owner_id, now)) >= AZAMI_ACIK_TAKIP:
         log.info("Takip sınırı dolu (owner=%s), '%s' alınmadı", owner_id, konu)
         return None
 
@@ -184,10 +198,11 @@ def unut(conn, takip_id: int) -> Optional[Dict[str, Any]]:
     return dict(row)
 
 
-def temizle(conn) -> int:
+def temizle(conn, now: Optional[datetime] = None) -> int:
     """Bayatlamış (vakti geçmiş ama sorulmamış) ve sorulmuş eski takipleri siler."""
-    bayat = (datetime.now(TZ) - timedelta(days=TAKIP_BAYATLAMA_GUNU)).isoformat()
-    eski_soru = (datetime.now(TZ) - timedelta(days=30)).isoformat()
+    now = now or datetime.now(TZ)
+    bayat = (now - timedelta(days=TAKIP_BAYATLAMA_GUNU)).isoformat()
+    eski_soru = (now - timedelta(days=30)).isoformat()
     silinen = conn.execute(
         "DELETE FROM takipler WHERE (soruldu_at IS NULL AND sorulacak_at < ?) "
         "OR (soruldu_at IS NOT NULL AND soruldu_at < ?)",
